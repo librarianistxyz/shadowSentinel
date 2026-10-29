@@ -1156,22 +1156,6 @@ async function streamConversation(userPrompt) {
   conversationTurnId++;
   var thisTurnId = conversationTurnId;
 
-  // If user simply said a bare greeting / wake word without an actual quiz or command:
-  var isBareGreeting = /^(?:(?:hey|ok|okay|hi|hello|yo)\s+)?(?:shadow|shadows)?[.!?]?$/i.test(cleanPrompt) || /^(?:hello|hi|hey|yo|good\s+(?:morning|afternoon|evening|day))[.!?]?$/i.test(cleanPrompt);
-  if (isBareGreeting) {
-    console.log('[BARE GREETING]: No quiz or command thrown - strictly maintaining silence and attentive posture');
-    maintainActiveConversation();
-    idleGazeDirection.x = 0;
-    idleGazeDirection.y = 0;
-    mouthTarget.openness = 0.0;
-    mouthTarget.smile = 0.04;
-    mouthTarget.teethVisible = 0.0;
-    triggerBlink();
-    isAwaitingResponse = false;
-    resumeMicrophone(300);
-    return;
-  }
-
   // Abort previous fetch/stream if still active
   if (currentStreamAbortController) {
     try { currentStreamAbortController.abort(); } catch(e) {}
@@ -1472,26 +1456,27 @@ function commitUserSpeech() {
   if (text.length > 0) {
     console.log('[USER SPEECH RECEIVED]:', text);
 
-    // If currently in silent sentinel sleep mode, enforce Wake-Word Gating!
-    if (currentWakeState === WAKE_STATE_ASLEEP) {
-      var wakeMatch = text.match(/^(?:.*?\b)?(?:hey|ok|okay|hi|hello|yo)?\s*\bshadow\b[\s,:-]*(.*)$/i);
-      if (wakeMatch) {
-        var command = (wakeMatch[1] || '').trim();
-        if (window.ShadowNative && typeof window.ShadowNative.playWakeChime === 'function') {
-          window.ShadowNative.playWakeChime();
-        }
-        window.ShadowMouth.onWakeWordDetected('hey shadow', command);
-        return;
-      } else {
-        // Discard ambient background chatter while asleep from complete silence!
-        console.log('[SENTINEL SLEEP]: Ignored ambient noise without wake word:', text);
-        return;
-      }
+    // If asleep in lockdown, speech naturally wakes Shadow up
+    if (isSentinelLockdown) {
+      isSentinelLockdown = false;
+      maintainActiveConversation();
+      triggerBlink();
     }
 
-    // If already awake in conversational follow-up window, refresh timer and stream!
+    // Check for acoustic barge-in interruption command
+    var isListenInterrupt = /^(?:listen|hey\s+listen|stop|stop\s+talking|quiet|be\s+quiet|wait|hold\s+on|shh|shush|hush|shut\s+up|pause|silence)\b/i.test(text.trim());
+    if (isListenInterrupt) {
+      if (window.ShadowMouth && typeof window.ShadowMouth.onAcousticInterrupted === 'function') {
+        window.ShadowMouth.onAcousticInterrupted();
+      }
+      return;
+    }
+
     resetWakeFollowUpTimer();
     pauseMicrophone();
+    if (EMOTIONAL_TRIGGERS_REGEX && EMOTIONAL_TRIGGERS_REGEX.test(text)) {
+      triggerEmotionalTears(1.0, 50000);
+    }
     streamConversation(text);
   }
 }
@@ -1798,62 +1783,50 @@ window.ShadowMouth = {
     }
   },
 
-  // On-Device Wake-Word & Greeting Detection Event ("Hey Shadow", "Hey Hello", "Hello", etc.)
-  onWakeWordDetected: function(phrase, trailingCommand) {
-    console.log('[WAKE-WORD / GREETING DETECTED]:', phrase, 'Trailing command:', trailingCommand);
-
-    // Reject acoustic residue within 600ms of an interruption:
-    if (Date.now() - lastInterruptionTime < 600) {
-      console.log('[WAKE-WORD BLOCKED]: Acoustic residue within 600ms of interruption discarded');
-      return;
-    }
-
-    // Wake word resets acoustic silence lock - user is actively speaking to Shadow again!
-    isAcousticallySilenced = false;
-
-    maintainActiveConversation();
-
-    // Snap eyes to intense direct forward gaze
-    idleGazeDirection.x = 0;
-    idleGazeDirection.y = 0;
-
-    // Visual alert gaze: eyes attentive, mouth shut, waiting for quiz/command
-    mouthTarget.openness = 0.0;
-    mouthTarget.smile = 0.04;
-    mouthTarget.teethVisible = 0.0;
-    triggerBlink();
-
-    // If a trailing command/quiz was given in the same breath ("Hey Shadow what time is it", "Hey hello who won the match"):
-    if (trailingCommand && trailingCommand.trim().length > 1) {
-      console.log('[WAKE-WORD] Executing trailing command:', trailingCommand);
-      pauseMicrophone();
-      streamConversation(trailingCommand.trim());
-      return;
-    }
-
-    // When no quiz or command was thrown, NEVER respond verbally! Keep completely quiet and attentive
-    console.log('[WAKE-WORD]: No quiz or command thrown - strictly maintaining silence and listening.');
-  },
-
-  // Conversational follow-up speech captured by native on-device engine
-  onFollowUpSpeech: function(speechText) {
-    console.log('[ON-DEVICE FOLLOW-UP SPEECH]:', speechText);
+  // Direct Voice Command Received from Native Speech Engine (Zero wake-word barrier)
+  onSpeechRecognized: function(speechText) {
+    console.log('[DIRECT VOICE COMMAND RECEIVED]:', speechText);
     if (!speechText || !speechText.trim()) return;
 
-    // Reject any acoustic residue captured within 600ms of an interruption:
-    if (Date.now() - lastInterruptionTime < 600) {
-      console.log('[SPEECH BLOCKED]: Acoustic residue within 600ms of interruption discarded');
+    // Reject acoustic residue within 500ms of an interruption
+    if (Date.now() - lastInterruptionTime < 500) {
+      console.log('[SPEECH BLOCKED]: Acoustic residue within 500ms of interruption discarded');
       return;
     }
 
-    // A real follow-up command or question clears acoustic silence!
     isAcousticallySilenced = false;
-
     maintainActiveConversation();
-    if (EMOTIONAL_TRIGGERS_REGEX.test(speechText)) {
+
+    // Snap eyes forward attentively
+    idleGazeDirection.x = 0;
+    idleGazeDirection.y = 0;
+    triggerBlink();
+
+    if (EMOTIONAL_TRIGGERS_REGEX && EMOTIONAL_TRIGGERS_REGEX.test(speechText)) {
       triggerEmotionalTears(1.0, 50000);
     }
+    pauseMicrophone();
     streamConversation(speechText.trim());
+  },
+
+  // Backwards compatibility alias
+  onFollowUpSpeech: function(speechText) {
+    if (window.ShadowMouth && typeof window.ShadowMouth.onSpeechRecognized === 'function') {
+      window.ShadowMouth.onSpeechRecognized(speechText);
+    }
+  },
+
+  // Backwards compatibility alias for wake word event
+  onWakeWordDetected: function(phrase, trailingCommand) {
+    var cmd = (trailingCommand || '').trim();
+    if (cmd) {
+      if (window.ShadowMouth && typeof window.ShadowMouth.onSpeechRecognized === 'function') {
+        window.ShadowMouth.onSpeechRecognized(cmd);
+      }
+    } else {
+      maintainActiveConversation();
+      triggerBlink();
+    }
   },
 
   // Physical Hardware Bixby Push-to-Talk (PTT)

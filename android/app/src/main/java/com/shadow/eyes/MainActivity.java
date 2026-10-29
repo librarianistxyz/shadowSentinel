@@ -87,57 +87,34 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         mainHandler.post(new WakeWordStateTask(webView, listening));
     }
 
-    static class HandleWakeWordTask implements Runnable {
+    static class HandleSpeechRecognizedTask implements Runnable {
         private final MainActivity activity;
-        private final String phrase;
-        private final String command;
-        public HandleWakeWordTask(MainActivity activity, String phrase, String command) {
+        private final String speechText;
+        public HandleSpeechRecognizedTask(MainActivity activity, String speechText) {
             this.activity = activity;
-            this.phrase = phrase;
-            this.command = command;
+            this.speechText = speechText;
         }
         @Override
         public void run() {
             try {
                 PowerManager pm = (PowerManager) activity.getSystemService(Context.POWER_SERVICE);
                 if (pm != null) {
-                    PowerManager.WakeLock wl = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "ShadowEyes:WakeWord");
+                    PowerManager.WakeLock wl = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "ShadowEyes:VoiceInput");
                     wl.acquire(3000);
                 }
             } catch (Exception ignored) {}
 
-            if (activity.webView != null) {
-                String js = "window.ShadowMouth && window.ShadowMouth.onWakeWordDetected(" +
-                            org.json.JSONObject.quote(phrase != null ? phrase : "") + ", " +
-                            org.json.JSONObject.quote(command != null ? command : "") + ");";
-                activity.webView.evaluateJavascript(js, null);
-            }
-        }
-    }
-
-    public void handleWakeWord(final String phrase, final String command) {
-        mainHandler.post(new HandleWakeWordTask(this, phrase, command));
-    }
-
-    static class HandleFollowUpTask implements Runnable {
-        private final MainActivity activity;
-        private final String speechText;
-        public HandleFollowUpTask(MainActivity activity, String speechText) {
-            this.activity = activity;
-            this.speechText = speechText;
-        }
-        @Override
-        public void run() {
             if (activity.webView != null && speechText != null) {
-                String js = "window.ShadowMouth && window.ShadowMouth.onFollowUpSpeech(" +
-                            org.json.JSONObject.quote(speechText) + ");";
+                String js = "window.ShadowMouth && (window.ShadowMouth.onSpeechRecognized ? " +
+                            "window.ShadowMouth.onSpeechRecognized(" + org.json.JSONObject.quote(speechText) + ") : " +
+                            "window.ShadowMouth.onFollowUpSpeech(" + org.json.JSONObject.quote(speechText) + "));";
                 activity.webView.evaluateJavascript(js, null);
             }
         }
     }
 
-    public void handleFollowUpSpeech(final String speechText) {
-        mainHandler.post(new HandleFollowUpTask(this, speechText));
+    public void handleSpeechRecognized(final String speechText) {
+        mainHandler.post(new HandleSpeechRecognizedTask(this, speechText));
     }
 
     static class HandlePttTask implements Runnable {
@@ -155,7 +132,6 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     activity.stopSpeaking();
                 }
                 if (activity.wakeWordEngine != null) {
-                    activity.wakeWordEngine.setFollowUpMode(true);
                     activity.wakeWordEngine.resume();
                 }
             }
@@ -182,12 +158,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             this.activity = activity;
         }
         @Override
-        public void onWakeWord(String detectedPhrase, String trailingCommand) {
-            activity.handleWakeWord(detectedPhrase, trailingCommand);
-        }
-        @Override
-        public void onFollowUpSpeech(String speechText) {
-            activity.handleFollowUpSpeech(speechText);
+        public void onSpeechRecognized(String speechText) {
+            activity.handleSpeechRecognized(speechText);
         }
         @Override
         public void onInterruptionRequested() {
@@ -736,9 +708,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             activity.notifyNativeSpeechState(false);
             if (activity.wakeWordEngine != null) {
                 activity.wakeWordEngine.setInterruptionOnlyMode(false);
-                activity.wakeWordEngine.setFollowUpMode(true);
                 activity.wakeWordEngine.pause();
-                activity.mainHandler.postDelayed(new ResumeWakeWordTask(activity.wakeWordEngine), 1200);
+                activity.mainHandler.postDelayed(new ResumeWakeWordTask(activity.wakeWordEngine), 600);
             }
             // Subtle 35ms haptic confirmation
             try {

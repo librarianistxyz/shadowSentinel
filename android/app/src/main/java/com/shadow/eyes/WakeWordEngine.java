@@ -3,7 +3,6 @@ package com.shadow.eyes;
 import android.content.Context;
 import android.content.Intent;
 import android.media.AudioManager;
-import android.media.ToneGenerator;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,35 +14,21 @@ import android.util.Log;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * On-Device Local Wake-Word Engine for Shadow.
- * Continuously monitors audio from complete silence on-device.
- * Detects "Hey Shadow", "Shadow", "OK Shadow", "Hi Shadow", "Yo Shadow".
+ * Robust On-Device Voice Engine for Shadow.
+ * Directly listens for user commands and questions with zero wake-word barrier.
+ * Also monitors for acoustic barge-in commands ("listen", "stop", "quiet").
  */
 public class WakeWordEngine {
     private static final String TAG = "WakeWordEngine";
 
     public interface WakeWordListener {
-        void onWakeWord(String detectedPhrase, String trailingCommand);
-        void onFollowUpSpeech(String speechText);
+        void onSpeechRecognized(String speechText);
         void onInterruptionRequested();
         void onListeningStateChanged(boolean isListening);
         void onWakeWordRmsChanged(float rmsDb);
-    }
-
-    public static class WakeMatchResult {
-        public final boolean matched;
-        public final String phrase;
-        public final String trailingCommand;
-
-        public WakeMatchResult(boolean matched, String phrase, String trailingCommand) {
-            this.matched = matched;
-            this.phrase = phrase;
-            this.trailingCommand = trailingCommand;
-        }
     }
 
     private final Context context;
@@ -56,35 +41,13 @@ public class WakeWordEngine {
     private volatile boolean isRunning = false;
     private volatile boolean isPaused = false;
     private volatile boolean isListening = false;
-    private volatile boolean isTriggered = false;
-    private volatile boolean isFollowUpMode = true; // Alert conversational state active by default
     private volatile boolean isInterruptionOnlyMode = false; // When true (during speech), only barge-in triggers like "listen" are processed
 
     private long lastWakeTriggerTime = 0;
-    private static final long WAKE_COOLDOWN_MS = 1500;
 
     // Acoustic Barge-in Interruption Pattern:
-    // Expanded for high-noise acoustic overlap variants ("listen", "listened", "listening", "stop it", "wait", etc.)
     private static final Pattern INTERRUPT_PATTERN = Pattern.compile(
         "\\b(listen|listens|listening|listened|hey\\s+listen|shadow\\s+listen|listen\\s+shadow|stop|stops|stopping|stop\\s+it|stop\\s+talking|quiet|be\\s+quiet|quiet\\s+down|wait|wait\\s+a\\s+sec(?:ond)?|wait\\s+up|wait\\s+a\\s+min(?:ute)?|hold\\s+on|hold\\s+up|shh|shush|hush|shut\\s+up|pause|silence|enough|halt|cancel)\\b",
-        Pattern.CASE_INSENSITIVE
-    );
-
-    // Multi-trigger pattern: conversational greetings, wake commands, and name triggers
-    // Matches "hey hello", "hello", "hi", "hey", "wake up", "are you there", "good morning", "hey shadow", etc.
-    private static final Pattern WAKE_WORD_PATTERN = Pattern.compile(
-        "^\\s*(?:" +
-        "(?:hey|ok|okay|hi|hello|yo)?\\s*(?:shadow|shadows|shado)\\b" +
-        "|hey\\s+hello\\b" +
-        "|hello(?:\\s+there)?\\b" +
-        "|hi(?:\\s+there)?\\b" +
-        "|hey(?:\\s+there)?\\b" +
-        "|wake\\s+up\\b" +
-        "|are\\s+you\\s+(?:there|awake)\\b" +
-        "|you\\s+there\\b" +
-        "|good\\s+(?:morning|afternoon|evening|day)\\b" +
-        "|what(?:'s|s)\\s+up\\b" +
-        ")",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -109,7 +72,7 @@ public class WakeWordEngine {
         if (isRunning) return;
         isRunning = true;
         isPaused = false;
-        Log.i(TAG, "Starting on-device Wake-Word Engine...");
+        Log.i(TAG, "Starting on-device Voice Engine (direct speech listening without wake-word)...");
         mainHandler.post(new StartListeningTask(this));
     }
 
@@ -117,31 +80,30 @@ public class WakeWordEngine {
         isRunning = false;
         isPaused = false;
         isListening = false;
-        Log.i(TAG, "Stopping on-device Wake-Word Engine...");
+        Log.i(TAG, "Stopping on-device Voice Engine...");
         mainHandler.post(new StopListeningTask(this));
     }
 
     public synchronized void pause() {
         if (!isRunning || isPaused) return;
         isPaused = true;
-        Log.d(TAG, "Pausing Wake-Word Engine (Acoustic Echo Shield)");
+        Log.d(TAG, "Pausing Voice Engine");
         mainHandler.post(new CancelListeningTask(this));
     }
 
     public synchronized void resume() {
         if (!isRunning || !isPaused) return;
         isPaused = false;
-        Log.d(TAG, "Resuming Wake-Word Engine after speech cooldown");
-        mainHandler.postDelayed(new StartListeningTask(this), 250);
+        Log.d(TAG, "Resuming Voice Engine");
+        mainHandler.postDelayed(new StartListeningTask(this), 200);
     }
 
     public void setFollowUpMode(boolean active) {
-        this.isFollowUpMode = active;
-        Log.d(TAG, "Follow-up conversation mode set to: " + active);
+        // No-op compatibility stub
     }
 
     public boolean isFollowUpMode() {
-        return isFollowUpMode;
+        return true;
     }
 
     public synchronized void setInterruptionOnlyMode(boolean active) {
@@ -170,33 +132,8 @@ public class WakeWordEngine {
         return INTERRUPT_PATTERN.matcher(input.trim()).find();
     }
 
-    public static WakeMatchResult checkWakeWord(String input) {
-        if (input == null || input.trim().isEmpty()) {
-            return new WakeMatchResult(false, "", "");
-        }
-        String clean = input.toLowerCase()
-            .replaceAll("[^a-z0-9' ]", " ")
-            .replaceAll("\\s+", " ")
-            .trim();
-
-        Matcher m = WAKE_WORD_PATTERN.matcher(clean);
-        if (m.find()) {
-            int end = m.end();
-            String matchedPhrase = clean.substring(m.start(), end).trim();
-            String trailing = clean.substring(end).trim();
-            return new WakeMatchResult(true, matchedPhrase, trailing);
-        }
-        return new WakeMatchResult(false, "", "");
-    }
-
     public void playWakeChime() {
-        try {
-            final ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_MUSIC, 85);
-            tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 110);
-            mainHandler.postDelayed(new ReleaseToneTask(tg), 300);
-        } catch (Exception e) {
-            Log.w(TAG, "Could not play wake chime: " + e.getMessage());
-        }
+        // No-op compatibility stub (wake chime eliminated with wake words)
     }
 
     void startListeningInternal() {
@@ -217,9 +154,8 @@ public class WakeWordEngine {
                 } catch (Exception ignored) {}
             }
 
-            isTriggered = false;
             speechRecognizer.startListening(recognizerIntent);
-            Log.d(TAG, "Active wake-word listening online (waiting for 'Hey Shadow' from silence)");
+            Log.d(TAG, "Voice input active - listening for user commands/questions");
         } catch (Exception e) {
             Log.e(TAG, "startListening error", e);
             scheduleResetAndRestart(500);
@@ -265,37 +201,17 @@ public class WakeWordEngine {
         mainHandler.postDelayed(new StartListeningTask(this), delayMs);
     }
 
-    void handleWakeWordInternal(String phrase, String command) {
+    void handleSpeechRecognizedInternal(String speechText) {
+        if (speechText == null || speechText.trim().isEmpty()) return;
         long now = System.currentTimeMillis();
-        if (now - lastWakeTriggerTime < WAKE_COOLDOWN_MS) {
+        if (now - lastWakeTriggerTime < 500) {
             return;
         }
         lastWakeTriggerTime = now;
-        isTriggered = true;
-
-        Log.i(TAG, "WAKE-WORD DETECTED! Phrase: '" + phrase + "' | Command: '" + command + "'");
-
-        playWakeChime();
-
+        Log.i(TAG, "Speech recognized: '" + speechText + "'");
         if (listener != null) {
-            listener.onWakeWord(phrase, command);
+            listener.onSpeechRecognized(speechText.trim());
         }
-
-        // Brief pause after wake word trigger so app can process/speak
-        pause();
-    }
-
-    void handleFollowUpInternal(String speechText) {
-        long now = System.currentTimeMillis();
-        if (now - lastWakeTriggerTime < 800) {
-            return;
-        }
-        lastWakeTriggerTime = now;
-        Log.i(TAG, "Conversational follow-up speech captured: '" + speechText + "'");
-        if (listener != null) {
-            listener.onFollowUpSpeech(speechText);
-        }
-        pause();
     }
 
     void handleInterruptionInternal() {
@@ -309,8 +225,7 @@ public class WakeWordEngine {
         if (listener != null) {
             listener.onInterruptionRequested();
         }
-        // Give 1200ms acoustic decay cooldown so room echoes and speaker reverb drain completely
-        scheduleRestart(1200);
+        scheduleRestart(800);
     }
 
     // =========================================================================
@@ -359,21 +274,6 @@ public class WakeWordEngine {
         }
     }
 
-    static class ReleaseToneTask implements Runnable {
-        private final ToneGenerator tg;
-        public ReleaseToneTask(ToneGenerator tg) {
-            this.tg = tg;
-        }
-        @Override
-        public void run() {
-            try {
-                if (tg != null) {
-                    tg.release();
-                }
-            } catch (Exception ignored) {}
-        }
-    }
-
     static class ShadowRecognitionListener implements RecognitionListener {
         private final WeakReference<WakeWordEngine> engineRef;
 
@@ -394,7 +294,7 @@ public class WakeWordEngine {
 
         @Override
         public void onBeginningOfSpeech() {
-            Log.d(TAG, "Audio detected in silence, parsing wake candidate...");
+            Log.d(TAG, "User speech detected...");
         }
 
         @Override
@@ -429,7 +329,7 @@ public class WakeWordEngine {
                 engine.listener.onListeningStateChanged(false);
             }
 
-            // In complete silence, timeout (6) and no-match (7) are expected normal events
+            // Normal silence timeouts (6) and no-match (7) smoothly restart
             if (error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_NO_MATCH) {
                 engine.scheduleRestart(250);
             } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT || error == 13) {
@@ -437,15 +337,15 @@ public class WakeWordEngine {
             } else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                 Log.e(TAG, "SpeechRecognizer missing RECORD_AUDIO permission!");
             } else {
-                Log.d(TAG, "SpeechRecognizer status code: " + error + ", continuing silent sentinel loop");
-                engine.scheduleRestart(400);
+                Log.d(TAG, "SpeechRecognizer status code: " + error);
+                engine.scheduleRestart(350);
             }
         }
 
         @Override
         public void onPartialResults(Bundle partialResults) {
             WakeWordEngine engine = engineRef.get();
-            if (engine == null || !engine.isRunning || engine.isPaused || engine.isTriggered) return;
+            if (engine == null || !engine.isRunning || engine.isPaused) return;
 
             ArrayList<String> matches = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches != null) {
@@ -453,20 +353,6 @@ public class WakeWordEngine {
                     if (checkInterrupt(text)) {
                         engine.handleInterruptionInternal();
                         return;
-                    }
-                    if (engine.isInterruptionOnlyMode) {
-                        // While in interruption-only mode, only barge-in words can trigger
-                        continue;
-                    }
-                    WakeMatchResult match = checkWakeWord(text);
-                    if (match.matched) {
-                        // When slumbering (!isFollowUpMode), trigger instant wake from partial match.
-                        // When alert and conversing (isFollowUpMode), wait for onResults so multi-word questions
-                        // starting with "hello..." or "wake up..." aren't prematurely interrupted.
-                        if (!engine.isFollowUpMode) {
-                            engine.handleWakeWordInternal(match.phrase, match.trailingCommand);
-                            return;
-                        }
                     }
                 }
             }
@@ -477,37 +363,24 @@ public class WakeWordEngine {
             WakeWordEngine engine = engineRef.get();
             if (engine == null || !engine.isRunning || engine.isPaused) return;
 
-            if (!engine.isTriggered) {
-                ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                if (matches != null && !matches.isEmpty()) {
-                    for (String text : matches) {
-                        if (checkInterrupt(text)) {
-                            engine.handleInterruptionInternal();
-                            return;
-                        }
+            ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+            if (matches != null && !matches.isEmpty()) {
+                for (String text : matches) {
+                    if (checkInterrupt(text)) {
+                        engine.handleInterruptionInternal();
+                        return;
                     }
+                }
 
-                    if (!engine.isInterruptionOnlyMode) {
-                        for (String text : matches) {
-                            WakeMatchResult match = checkWakeWord(text);
-                            if (match.matched) {
-                                engine.handleWakeWordInternal(match.phrase, match.trailingCommand);
-                                return;
-                            }
-                        }
-                        if (engine.isFollowUpMode) {
-                            String best = matches.get(0).trim();
-                            if (best.length() > 0) {
-                                engine.handleFollowUpInternal(best);
-                                return;
-                            }
-                        }
+                if (!engine.isInterruptionOnlyMode) {
+                    String best = matches.get(0).trim();
+                    if (best.length() > 0) {
+                        engine.handleSpeechRecognizedInternal(best);
                     }
                 }
             }
 
-            // If not triggered, smoothly resume silent sentinel loop
-            engine.scheduleRestart(100);
+            engine.scheduleRestart(150);
         }
 
         @Override
