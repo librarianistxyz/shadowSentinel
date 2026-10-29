@@ -923,6 +923,11 @@ var isProcessingQueue = false;
 var isAwaitingResponse = false;
 var isNativeSpeaking = false;
 var lastAiSpeechFinishedTime = 0;
+var currentStreamAbortController = null;
+var activeStreamReader = null;
+var isAcousticallySilenced = false;
+var lastInterruptionTime = 0;
+var conversationTurnId = 0;
 
 // ==============================================================================
 // ON-DEVICE WAKE-WORD & SENTINEL SILENCE CONTROLLER ("Hey Shadow", "Hey Hello", etc.)
@@ -987,6 +992,15 @@ function stopSpeaking() {
   isAwaitingResponse = false;
   lastAiSpeechFinishedTime = Date.now();
   
+  if (currentStreamAbortController) {
+    try { currentStreamAbortController.abort(); } catch(e) {}
+    currentStreamAbortController = null;
+  }
+  if (activeStreamReader) {
+    try { activeStreamReader.cancel(); } catch(e) {}
+    activeStreamReader = null;
+  }
+
   if (window.ShadowNative && typeof window.ShadowNative.stopSpeaking === 'function') {
     window.ShadowNative.stopSpeaking();
   } else if ('speechSynthesis' in window) {
@@ -1032,6 +1046,10 @@ function sanitizeSpeechText(text) {
 
 // Queue clauses and speak them with zero delay (clause-by-clause low-latency streaming)
 function enqueueSpeechClause(clause) {
+  if (isAcousticallySilenced) {
+    console.log('[ENQUEUE DISCARDED]: Silenced awaiting next user question - ignoring speech');
+    return;
+  }
   var clean = sanitizeSpeechText(clause);
   if (!clean) return;
   clauseQueue.push(clean);
@@ -1041,6 +1059,11 @@ function enqueueSpeechClause(clause) {
 }
 
 function processNextClause() {
+  if (isAcousticallySilenced) {
+    clauseQueue = [];
+    isProcessingQueue = false;
+    return;
+  }
   if (clauseQueue.length === 0) {
     isProcessingQueue = false;
     lastAiSpeechFinishedTime = Date.now();
@@ -1108,19 +1131,40 @@ async function streamConversation(userPrompt) {
   // Direct Acoustic Interruption / Keep Quiet command ("listen", "hey listen", "shadow listen", "be quiet", "stop talking", "hush", "wait", etc.)
   var isListenInterrupt = /^(?:shadow\s*,?\s*)?(?:listen|hey\s+listen|listen\s+shadow|be\s+quiet|quiet|hush|hold\s+on|wait|stop\s+talking|shut\s+up|silence|pause)[.!?]?$/i.test(cleanPrompt);
   if (isListenInterrupt) {
-    console.log('[LISTEN INTERRUPT]: Interrupted with "' + cleanPrompt + '" - keeping completely quiet and awaiting next command');
-    stopSpeaking();
-    maintainActiveConversation();
-    idleGazeDirection.x = 0;
-    idleGazeDirection.y = 0;
-    mouthTarget.openness = 0.0;
-    mouthTarget.smile = 0.04;
-    mouthTarget.teethVisible = 0.0;
-    triggerBlink();
+    console.log('[LISTEN INTERRUPT]: Interrupted with "' + cleanPrompt + '" - strictly shutting up and awaiting next quiz/question');
+    if (window.ShadowMouth && typeof window.ShadowMouth.onAcousticInterrupted === 'function') {
+      window.ShadowMouth.onAcousticInterrupted();
+    } else {
+      isAcousticallySilenced = true;
+      lastInterruptionTime = Date.now();
+      stopSpeaking();
+    }
     isAwaitingResponse = false;
-    resumeMicrophone(300);
     return;
   }
+
+  // Reject input if received within 1500ms of interruption (acoustic echo decay guard)
+  if (Date.now() - lastInterruptionTime < 1500) {
+    console.log('[PROMPT BLOCKED]: Echo residue within 1.5s of interruption discarded');
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // A genuine new question or command has arrived! Clear silenced flag and advance turn ID:
+  isAcousticallySilenced = false;
+  conversationTurnId++;
+  var thisTurnId = conversationTurnId;
+
+  // Abort previous fetch/stream if still active
+  if (currentStreamAbortController) {
+    try { currentStreamAbortController.abort(); } catch(e) {}
+    currentStreamAbortController = null;
+  }
+  if (activeStreamReader) {
+    try { activeStreamReader.cancel(); } catch(e) {}
+    activeStreamReader = null;
+  }
+  currentStreamAbortController = new AbortController();
   if (/^(?:sentinel\s+)?(?:enter\s+)?(?:lockdown|slumber|slumber\s+mode|sleep\s+mode|go\s+to\s+sleep)[.!?]?$/i.test(cleanPrompt)) {
     enterSilentSentinelMode();
     var sleepReply = "Sentinel lockdown engaged. Entering slumber.";
@@ -1227,6 +1271,7 @@ async function streamConversation(userPrompt) {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream'
       },
+      signal: currentStreamAbortController ? currentStreamAbortController.signal : undefined,
       body: JSON.stringify({
         message: cleanPrompt,
         history: conversationHistory.slice(0, -1).slice(-16),
@@ -1236,9 +1281,15 @@ async function streamConversation(userPrompt) {
       })
     });
     
+    if (thisTurnId !== conversationTurnId || isAcousticallySilenced) {
+      console.log('[STREAM DISCARDED]: Interrupted while awaiting fetch response');
+      return;
+    }
+
     if (!resp.ok || !resp.body) {
+      if (thisTurnId !== conversationTurnId || isAcousticallySilenced) return;
       var fallback = await queryCloudflareAi(cleanPrompt);
-      if (fallback) {
+      if (fallback && thisTurnId === conversationTurnId && !isAcousticallySilenced) {
         enqueueSpeechClause(fallback);
         conversationHistory.push({ role: 'assistant', content: fallback });
         persistHistory(conversationHistory);
@@ -1250,9 +1301,10 @@ async function streamConversation(userPrompt) {
 
     var contentType = resp.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
+      if (thisTurnId !== conversationTurnId || isAcousticallySilenced) return;
       var json = await resp.json();
       var reply = (json && (json.reply || json.response)) || '';
-      if (reply) {
+      if (reply && thisTurnId === conversationTurnId && !isAcousticallySilenced) {
         enqueueSpeechClause(reply);
         conversationHistory.push({ role: 'assistant', content: reply });
         persistHistory(conversationHistory);
@@ -1263,20 +1315,27 @@ async function streamConversation(userPrompt) {
     }
     
     var reader = resp.body.getReader();
+    activeStreamReader = reader;
     var decoder = new TextDecoder();
     var buffer = '';
     var fullReply = '';
     var activeClause = '';
     
     while (true) {
+      if (thisTurnId !== conversationTurnId || isAcousticallySilenced) {
+        console.log('[STREAM ABORTED]: Turn invalidated or user commanded listen/quiet');
+        try { reader.cancel(); } catch(e) {}
+        break;
+      }
       var chunk = await reader.read();
-      if (chunk.done) break;
+      if (chunk.done || thisTurnId !== conversationTurnId || isAcousticallySilenced) break;
       
       buffer += decoder.decode(chunk.value, { stream: true });
       var lines = buffer.split('\n');
       buffer = lines.pop() || '';
       
       for (var l = 0; l < lines.length; l++) {
+        if (thisTurnId !== conversationTurnId || isAcousticallySilenced) break;
         var line = lines[l].trim();
         if (!line.startsWith('data:')) continue;
         var dataStr = line.replace(/^data:\s*/, '').trim();
@@ -1293,7 +1352,7 @@ async function streamConversation(userPrompt) {
             token = parsed.candidates[0].content.parts[0].text;
           }
           
-          if (token) {
+          if (token && thisTurnId === conversationTurnId && !isAcousticallySilenced) {
             fullReply += token;
             activeClause += token;
             
@@ -1302,7 +1361,9 @@ async function streamConversation(userPrompt) {
             var isLengthyClause = activeClause.trim().split(/\s+/).length >= 10;
             
             if (isSentenceTerminator || isLengthyClause) {
-              enqueueSpeechClause(activeClause);
+              if (thisTurnId === conversationTurnId && !isAcousticallySilenced) {
+                enqueueSpeechClause(activeClause);
+              }
               activeClause = '';
             }
           }
@@ -1310,11 +1371,18 @@ async function streamConversation(userPrompt) {
       }
     }
     
-    if (activeClause.trim()) {
+    activeStreamReader = null;
+
+    if (thisTurnId !== conversationTurnId || isAcousticallySilenced) {
+      console.log('[STREAM DISCARDED]: Full reply discarded because user commanded listen');
+      return;
+    }
+
+    if (activeClause.trim() && !isAcousticallySilenced) {
       enqueueSpeechClause(activeClause);
     }
     
-    if (fullReply.trim()) {
+    if (fullReply.trim() && !isAcousticallySilenced) {
       conversationHistory.push({ role: 'assistant', content: fullReply.trim() });
       persistHistory(conversationHistory);
     } else {
@@ -1323,9 +1391,13 @@ async function streamConversation(userPrompt) {
     }
     
   } catch (err) {
+    if (thisTurnId !== conversationTurnId || isAcousticallySilenced || (err && err.name === 'AbortError')) {
+      console.log('[STREAM CANCELLED]: In-flight stream aborted successfully');
+      return;
+    }
     console.warn('Streaming error:', err);
     var errReply = await queryCloudflareAi(cleanPrompt);
-    if (errReply) {
+    if (errReply && thisTurnId === conversationTurnId && !isAcousticallySilenced) {
       enqueueSpeechClause(errReply);
       conversationHistory.push({ role: 'assistant', content: errReply });
       persistHistory(conversationHistory);
@@ -1333,6 +1405,10 @@ async function streamConversation(userPrompt) {
       resumeMicrophone(500);
     }
   } finally {
+    if (activeStreamReader) {
+      try { activeStreamReader.cancel(); } catch(e) {}
+      activeStreamReader = null;
+    }
     isAwaitingResponse = false;
     // Conversational watchdog: ensure mic is never stranded in a dead state
     setTimeout(function() {
@@ -1586,16 +1662,54 @@ window.ShadowMouth = {
 
   // Acoustic Interruption ("listen", "be quiet", "stop") triggered while speaking
   onAcousticInterrupted: function() {
-    console.log('[ACOUSTIC INTERRUPTED]: User commanded "listen" / "quiet" - silencing mouth immediately');
+    console.log('[ACOUSTIC INTERRUPTED]: User commanded "listen" - strictly shutting up and aborting old conversation');
+    isAcousticallySilenced = true;
+    lastInterruptionTime = Date.now();
+    conversationTurnId++;
+    
+    // Abort active fetch stream immediately
+    if (currentStreamAbortController) {
+      try { currentStreamAbortController.abort(); } catch(e) {}
+      currentStreamAbortController = null;
+    }
+    if (activeStreamReader) {
+      try { activeStreamReader.cancel(); } catch(e) {}
+      activeStreamReader = null;
+    }
+
+    // Stop speaking and clear all queued clauses
     stopSpeaking();
+
+    // Maintain active conversational readiness for the next quiz/question
     maintainActiveConversation();
+
+    // Visual posture: eyes centered forward, attentive, mouth snapped completely shut
     idleGazeDirection.x = 0;
     idleGazeDirection.y = 0;
     mouthTarget.openness = 0.0;
     mouthTarget.smile = 0.04;
     mouthTarget.teethVisible = 0.0;
+    mouthTarget.cornerLeftY = 0;
+    mouthTarget.cornerRightY = 0;
     triggerBlink();
-    resumeMicrophone(300);
+
+    // Strictly purge the interrupted turn from history so it never continues old conversation!
+    if (conversationHistory.length > 0) {
+      var lastEntry = conversationHistory[conversationHistory.length - 1];
+      if (lastEntry.role === 'assistant') {
+        conversationHistory.pop();
+      }
+    }
+    // Also remove the user question that was interrupted so the next turn starts completely fresh
+    if (conversationHistory.length > 0) {
+      var lastEntry2 = conversationHistory[conversationHistory.length - 1];
+      if (lastEntry2.role === 'user') {
+        conversationHistory.pop();
+      }
+    }
+    persistHistory(conversationHistory);
+
+    resumeMicrophone(1200);
   },
   
   // Real-time Streaming Conversation
@@ -1671,6 +1785,17 @@ window.ShadowMouth = {
   onWakeWordDetected: function(phrase, trailingCommand) {
     console.log('[WAKE-WORD / GREETING DETECTED]:', phrase, 'Trailing command:', trailingCommand);
 
+    // If user silenced Shadow with "listen" or within 1800ms of interruption, keep mouth shut and ignore residue:
+    if (isAcousticallySilenced || (Date.now() - lastInterruptionTime < 1800)) {
+      console.log('[WAKE-WORD BLOCKED]: Strictly silenced via "listen" - ignoring wake word and avoiding old conversation continuation');
+      idleGazeDirection.x = 0;
+      idleGazeDirection.y = 0;
+      mouthTarget.openness = 0.0;
+      mouthTarget.smile = 0.04;
+      mouthTarget.teethVisible = 0.0;
+      return;
+    }
+
     maintainActiveConversation();
 
     // Snap eyes to intense direct forward gaze
@@ -1712,6 +1837,13 @@ window.ShadowMouth = {
   onFollowUpSpeech: function(speechText) {
     console.log('[ON-DEVICE FOLLOW-UP SPEECH]:', speechText);
     if (!speechText || !speechText.trim()) return;
+
+    // Reject any acoustic residue captured within 1800ms of an interruption:
+    if (Date.now() - lastInterruptionTime < 1800) {
+      console.log('[SPEECH BLOCKED]: Acoustic residue within 1.8s of interruption discarded');
+      return;
+    }
+
     maintainActiveConversation();
     if (EMOTIONAL_TRIGGERS_REGEX.test(speechText)) {
       triggerEmotionalTears(1.0, 50000);

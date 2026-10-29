@@ -37,6 +37,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     boolean isTtsReady = false;
     public volatile boolean isNativeSpeaking = false;
     public volatile int activeUtterances = 0;
+    public volatile long speechSessionId = 0;
     public WakeWordEngine wakeWordEngine;
     final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -633,9 +634,12 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     static class SpeakTask implements Runnable {
         private final MainActivity activity;
         private final String text;
-        public SpeakTask(MainActivity activity, String text) {
+        private final long sessionId;
+
+        public SpeakTask(MainActivity activity, String text, long sessionId) {
             this.activity = activity;
             this.text = text;
+            this.sessionId = sessionId;
         }
 
         private static String smoothenText(String raw) {
@@ -656,6 +660,12 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
 
         @Override
         public void run() {
+            if (activity == null) return;
+            // CRITICAL: If session was invalidated (e.g. by "listen" / interruption), drop this utterance immediately!
+            if (this.sessionId != activity.speechSessionId) {
+                android.util.Log.i("ShadowEyes", "Dropping speech clause from aborted/silenced session (target: " + sessionId + ", current: " + activity.speechSessionId + ")");
+                return;
+            }
             if (activity.isTtsReady && activity.textToSpeech != null && text != null) {
                 String clean = smoothenText(text);
                 if (!clean.isEmpty()) {
@@ -689,18 +699,39 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
     }
 
+    static class ResumeWakeWordTask implements Runnable {
+        private final java.lang.ref.WeakReference<WakeWordEngine> engineRef;
+        public ResumeWakeWordTask(WakeWordEngine engine) {
+            this.engineRef = new java.lang.ref.WeakReference<>(engine);
+        }
+        @Override
+        public void run() {
+            WakeWordEngine engine = engineRef.get();
+            if (engine != null) {
+                engine.resume();
+            }
+        }
+    }
+
     static class AcousticInterruptionTask implements Runnable {
         private final MainActivity activity;
         public AcousticInterruptionTask(MainActivity activity) { this.activity = activity; }
         @Override
         public void run() {
             if (activity == null) return;
-            android.util.Log.i("ShadowEyes", "Acoustic interruption received ('listen' / 'quiet') - stopping speech and silencing Shadow");
-            activity.stopSpeaking();
+            android.util.Log.i("ShadowEyes", "Acoustic interruption received ('listen' / 'quiet') - shutting up completely, waiting for next question");
+            activity.speechSessionId++;
+            if (activity.textToSpeech != null) {
+                activity.textToSpeech.stop();
+            }
+            activity.activeUtterances = 0;
+            activity.isNativeSpeaking = false;
+            activity.notifyNativeSpeechState(false);
             if (activity.wakeWordEngine != null) {
                 activity.wakeWordEngine.setInterruptionOnlyMode(false);
                 activity.wakeWordEngine.setFollowUpMode(true);
-                activity.wakeWordEngine.resume();
+                activity.wakeWordEngine.pause();
+                activity.mainHandler.postDelayed(new ResumeWakeWordTask(activity.wakeWordEngine), 1200);
             }
             // Subtle 35ms haptic confirmation
             try {
@@ -1226,15 +1257,20 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     }
 
     public void stopSpeaking() {
+        speechSessionId++;
+        mainHandler.removeCallbacksAndMessages(null);
         mainHandler.post(new StopSpeakTask(this));
     }
 
     public void handleAcousticInterruption() {
+        speechSessionId++;
+        mainHandler.removeCallbacksAndMessages(null);
         mainHandler.post(new AcousticInterruptionTask(this));
     }
 
     public void speak(final String text) {
-        mainHandler.post(new SpeakTask(this, text));
+        final long currentSession = this.speechSessionId;
+        mainHandler.post(new SpeakTask(this, text, currentSession));
     }
 
     @Override

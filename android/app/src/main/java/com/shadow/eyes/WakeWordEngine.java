@@ -309,7 +309,8 @@ public class WakeWordEngine {
         if (listener != null) {
             listener.onInterruptionRequested();
         }
-        scheduleRestart(250);
+        // Give 1200ms acoustic decay cooldown so room echoes and speaker reverb drain completely
+        scheduleRestart(1200);
     }
 
     // =========================================================================
