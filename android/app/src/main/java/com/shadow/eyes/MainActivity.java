@@ -187,6 +187,11 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 }
             } catch (Exception ignored) {}
 
+            // Instant Local Action Routing (Zero round-trip to Cloudflare for hardware commands)
+            if (activity.tryExecuteFastPathAction(speechText)) {
+                return;
+            }
+
             if (activity.webView != null) {
                 String js = "window.ShadowMouth && (window.ShadowMouth.onSpeechRecognized ? " +
                             "window.ShadowMouth.onSpeechRecognized(" + org.json.JSONObject.quote(speechText) + ") : " +
@@ -424,6 +429,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     activity.handleAcousticInterruption();
                     return;
                 }
+                if (activity.tryExecuteFastPathAction(prompt)) {
+                    return;
+                }
                 android.util.Log.d("ShadowEyes", "Received test prompt broadcast: " + prompt);
                 activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.streamConversation(" + org.json.JSONObject.quote(prompt) + ");", null);
             }
@@ -554,6 +562,216 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         } finally {
             isMusicDucked = false;
         }
+    }
+
+    // =========================================================================
+    // FAST-PATH LOCAL ACTION ROUTING (Zero Round-Trip for Hardware Commands)
+    // =========================================================================
+    private static final java.util.regex.Pattern FAST_TORCH_ON = java.util.regex.Pattern.compile(
+        "\\b(?:turn\\s+on\\s+(?:the\\s+)?(?:flashlight|torch)|(?:flashlight|torch)\\s+on|enable\\s+(?:the\\s+)?(?:flashlight|torch))\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+    private static final java.util.regex.Pattern FAST_TORCH_OFF = java.util.regex.Pattern.compile(
+        "\\b(?:turn\\s+off\\s+(?:the\\s+)?(?:flashlight|torch)|(?:flashlight|torch)\\s+off|disable\\s+(?:the\\s+)?(?:flashlight|torch))\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+    private static final java.util.regex.Pattern FAST_TORCH_GENERIC = java.util.regex.Pattern.compile(
+        "^\\s*(?:flashlight|torch)\\s*$",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+
+    private static final java.util.regex.Pattern FAST_VOL_UP = java.util.regex.Pattern.compile(
+        "\\b(?:volume\\s+up|turn\\s+up\\s+(?:the\\s+)?volume|increase\\s+(?:the\\s+)?volume|raise\\s+(?:the\\s+)?volume|louder)\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+    private static final java.util.regex.Pattern FAST_VOL_DOWN = java.util.regex.Pattern.compile(
+        "\\b(?:volume\\s+down|turn\\s+down\\s+(?:the\\s+)?volume|decrease\\s+(?:the\\s+)?volume|lower\\s+(?:the\\s+)?volume|softer)\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+    private static final java.util.regex.Pattern FAST_VOL_MUTE = java.util.regex.Pattern.compile(
+        "^\\s*(?:mute|unmute|mute\\s+volume|silence\\s+audio)\\s*$",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+
+    private static final java.util.regex.Pattern FAST_PHOTO = java.util.regex.Pattern.compile(
+        "\\b(?:take\\s+(?:a\\s+)?photo|take\\s+(?:a\\s+)?picture|snap\\s+(?:a\\s+)?photo|snap\\s+(?:a\\s+)?picture|capture\\s+photo)\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+    private static final java.util.regex.Pattern FAST_VIDEO = java.util.regex.Pattern.compile(
+        "\\b(?:record\\s+(?:a\\s+)?video|start\\s+recording|capture\\s+video)\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+
+    private static final java.util.regex.Pattern FAST_MEDIA_PAUSE = java.util.regex.Pattern.compile(
+        "\\b(?:pause\\s+(?:music|song|playback)|stop\\s+music)\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+    private static final java.util.regex.Pattern FAST_MEDIA_RESUME = java.util.regex.Pattern.compile(
+        "\\b(?:resume\\s+(?:music|song|playback)|play\\s+music|continue\\s+music)\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+    private static final java.util.regex.Pattern FAST_MEDIA_NEXT = java.util.regex.Pattern.compile(
+        "\\b(?:next\\s+(?:song|track)|skip\\s+(?:song|track))\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+    private static final java.util.regex.Pattern FAST_MEDIA_PREV = java.util.regex.Pattern.compile(
+        "\\b(?:previous\\s+(?:song|track)|prev\\s+(?:song|track))\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+
+    private static final java.util.regex.Pattern FAST_OPEN_APP = java.util.regex.Pattern.compile(
+        "^\\s*(?:can you\\s+)?(?:please\\s+)?(?:open|launch|start|run|go to)\\s+(?:the\\s+)?([a-zA-Z0-9 ]+?)\\s*(?:app|application|apk)?\\s*$",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+
+    private static final java.util.regex.Pattern CONVERSATIONAL_QUESTION = java.util.regex.Pattern.compile(
+        "^\\s*(?:who|what|where|when|why|how|explain|tell me|can you tell|define|is it|are you|do you|what's|how's)\\b",
+        java.util.regex.Pattern.CASE_INSENSITIVE
+    );
+
+    private boolean isTorchActive = false;
+
+    public void toggleTorch() {
+        isTorchActive = !isTorchActive;
+        executeDeviceAction("TORCH", isTorchActive ? "ON" : "OFF");
+        speak(isTorchActive ? "Flashlight on." : "Flashlight off.");
+    }
+
+    public void wakeMouthVisual() {
+        if (webView != null) {
+            webView.evaluateJavascript("window.maintainActiveConversation && window.maintainActiveConversation();", null);
+        }
+    }
+
+    public boolean tryExecuteFastPathAction(final String rawText) {
+        if (rawText == null || rawText.trim().isEmpty()) return false;
+        final String text = rawText.trim();
+
+        // 1. Guard: Never intercept conversational questions or quiz prompts
+        if (CONVERSATIONAL_QUESTION.matcher(text).find()) {
+            return false;
+        }
+
+        // 2. Torch / Flashlight:
+        if (FAST_TORCH_ON.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Torch ON triggered locally in 2ms");
+            triggerHapticClick(45);
+            executeDeviceAction("TORCH", "ON");
+            speak("Flashlight on.");
+            wakeMouthVisual();
+            return true;
+        }
+        if (FAST_TORCH_OFF.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Torch OFF triggered locally in 2ms");
+            triggerHapticClick(45);
+            executeDeviceAction("TORCH", "OFF");
+            speak("Flashlight off.");
+            wakeMouthVisual();
+            return true;
+        }
+        if (FAST_TORCH_GENERIC.matcher(text).matches()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Torch toggle triggered locally in 2ms");
+            triggerHapticClick(45);
+            toggleTorch();
+            wakeMouthVisual();
+            return true;
+        }
+
+        // 3. Volume Controls:
+        if (FAST_VOL_UP.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Volume UP triggered locally in 2ms");
+            triggerHapticClick(35);
+            executeDeviceAction("VOLUME", "UP");
+            speak("Volume up.");
+            wakeMouthVisual();
+            return true;
+        }
+        if (FAST_VOL_DOWN.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Volume DOWN triggered locally in 2ms");
+            triggerHapticClick(35);
+            executeDeviceAction("VOLUME", "DOWN");
+            speak("Volume down.");
+            wakeMouthVisual();
+            return true;
+        }
+        if (FAST_VOL_MUTE.matcher(text).matches()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Volume MUTE triggered locally in 2ms");
+            triggerHapticClick(35);
+            executeDeviceAction("VOLUME", "MUTE");
+            wakeMouthVisual();
+            return true;
+        }
+
+        // 4. Photo / Video:
+        if (FAST_PHOTO.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Take photo triggered locally in 2ms");
+            triggerHapticClick(50);
+            executeDeviceAction("TAKE_PHOTO", "");
+            speak("Taking photo.");
+            wakeMouthVisual();
+            return true;
+        }
+        if (FAST_VIDEO.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Record video triggered locally in 2ms");
+            triggerHapticClick(50);
+            executeDeviceAction("RECORD_VIDEO", "");
+            speak("Recording video.");
+            wakeMouthVisual();
+            return true;
+        }
+
+        // 5. Media Playback Controls:
+        if (FAST_MEDIA_PAUSE.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Media pause triggered locally in 2ms");
+            triggerHapticClick(35);
+            executeDeviceAction("PAUSE_MEDIA", "");
+            speak("Paused.");
+            wakeMouthVisual();
+            return true;
+        }
+        if (FAST_MEDIA_RESUME.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Media resume triggered locally in 2ms");
+            triggerHapticClick(35);
+            executeDeviceAction("RESUME_MEDIA", "");
+            speak("Resuming music.");
+            wakeMouthVisual();
+            return true;
+        }
+        if (FAST_MEDIA_NEXT.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Media next track triggered locally in 2ms");
+            triggerHapticClick(35);
+            executeDeviceAction("NEXT_TRACK", "");
+            speak("Next track.");
+            wakeMouthVisual();
+            return true;
+        }
+        if (FAST_MEDIA_PREV.matcher(text).find()) {
+            android.util.Log.i("ShadowEyes", "[FAST-PATH] Media previous track triggered locally in 2ms");
+            triggerHapticClick(35);
+            executeDeviceAction("PREV_TRACK", "");
+            speak("Previous track.");
+            wakeMouthVisual();
+            return true;
+        }
+
+        // 6. Direct App Launch (e.g. "open WhatsApp", "open Spotify", "open Camera", etc.):
+        java.util.regex.Matcher appMatcher = FAST_OPEN_APP.matcher(text);
+        if (appMatcher.matches()) {
+            String appName = appMatcher.group(1);
+            if (appName != null && !appName.trim().isEmpty()) {
+                appName = appName.trim();
+                boolean launched = launchAppByName(appName);
+                if (launched) {
+                    android.util.Log.i("ShadowEyes", "[FAST-PATH] Launched app '" + appName + "' locally in 2ms");
+                    triggerHapticClick(45);
+                    speak("Opening " + appName + ".");
+                    wakeMouthVisual();
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void triggerHapticClick(int durationMs) {
@@ -1111,6 +1329,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
 
         if (action.equals("TORCH")) {
             boolean enable = "ON".equalsIgnoreCase(param) || "TRUE".equalsIgnoreCase(param);
+            this.isTorchActive = enable;
             mainHandler.post(new SetTorchTask(this, enable));
             return true;
         }
