@@ -3,8 +3,10 @@ package com.shadow.eyes;
 import android.Manifest;
 import android.app.Activity;
 import android.app.SearchManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.hardware.camera2.CameraCharacteristics;
@@ -76,7 +78,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         @Override
         public void onDone(String utteranceId) {
             activity.activeUtterances--;
-            if (activity.activeUtterances <= 0) {
+            boolean stillSpeaking = activity.textToSpeech != null && activity.textToSpeech.isSpeaking();
+            if (activity.activeUtterances <= 0 || !stillSpeaking) {
                 activity.activeUtterances = 0;
                 activity.isNativeSpeaking = false;
                 activity.notifyNativeSpeechState(false);
@@ -85,7 +88,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         @Override
         public void onError(String utteranceId) {
             activity.activeUtterances--;
-            if (activity.activeUtterances <= 0) {
+            boolean stillSpeaking = activity.textToSpeech != null && activity.textToSpeech.isSpeaking();
+            if (activity.activeUtterances <= 0 || !stillSpeaking) {
                 activity.activeUtterances = 0;
                 activity.isNativeSpeaking = false;
                 activity.notifyNativeSpeechState(false);
@@ -106,6 +110,21 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 activity.textToSpeech.setSpeechRate(1.18f);
                 activity.textToSpeech.setOnUtteranceProgressListener(new ShadowUtteranceListener(activity));
                 activity.isTtsReady = true;
+            }
+        }
+    }
+
+    static class PromptReceiver extends BroadcastReceiver {
+        private final MainActivity activity;
+        public PromptReceiver(MainActivity activity) {
+            this.activity = activity;
+        }
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String prompt = intent.getStringExtra("prompt");
+            if (prompt != null && activity != null && activity.webView != null) {
+                android.util.Log.d("ShadowEyes", "Received test prompt broadcast: " + prompt);
+                activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.streamConversation(" + org.json.JSONObject.quote(prompt) + ");", null);
             }
         }
     }
@@ -136,6 +155,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         configureWebView();
 
         sentinelCamera = new SentinelCamera(this, this);
+
+        registerReceiver(new PromptReceiver(this), new IntentFilter("com.shadow.eyes.TEST_PROMPT"));
 
         if (hasAllPermissions()) {
             sentinelCamera.start();
@@ -172,6 +193,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
         webView.clearCache(true);
+        WebView.setWebContentsDebuggingEnabled(true);
         webView.setWebChromeClient(new ShadowWebChromeClient());
         webView.setBackgroundColor(0xFF000000);
         webView.addJavascriptInterface(new ShadowBridge(this), "ShadowNative");
@@ -259,11 +281,11 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
         @Override
         public void run() {
-            if (activity.isTtsReady && activity.textToSpeech != null && text != null) {
+            if (activity.isTtsReady && activity.textToSpeech != null && text != null && !text.trim().isEmpty()) {
                 activity.activeUtterances++;
                 activity.isNativeSpeaking = true;
                 activity.notifyNativeSpeechState(true);
-                activity.textToSpeech.speak(text, TextToSpeech.QUEUE_ADD, null, "shadow_speech_" + System.currentTimeMillis());
+                activity.textToSpeech.speak(text.trim(), TextToSpeech.QUEUE_ADD, null, "shadow_speech_" + System.currentTimeMillis());
             }
         }
     }
@@ -819,6 +841,48 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     @Override
     public void onError(final String message) {
         android.util.Log.e("ShadowEyes", "Sentinel error: " + message);
+    }
+
+    static class VisionFrameResultTask implements Runnable {
+        private final WebView webView;
+        private final String base64Jpeg;
+        private final String error;
+        public VisionFrameResultTask(WebView webView, String base64Jpeg, String error) {
+            this.webView = webView;
+            this.base64Jpeg = base64Jpeg;
+            this.error = error;
+        }
+        @Override
+        public void run() {
+            if (webView != null) {
+                if (base64Jpeg != null) {
+                    webView.evaluateJavascript("window.onVisionFrameReady && window.onVisionFrameReady(" + org.json.JSONObject.quote(base64Jpeg) + ", null);", null);
+                } else {
+                    webView.evaluateJavascript("window.onVisionFrameReady && window.onVisionFrameReady(null, " + org.json.JSONObject.quote(error != null ? error : "Vision capture failed") + ");", null);
+                }
+            }
+        }
+    }
+
+    static class VisionFrameCallback implements SentinelCamera.FrameCallback {
+        private final MainActivity activity;
+        public VisionFrameCallback(MainActivity activity) { this.activity = activity; }
+        @Override
+        public void onFrameCaptured(String base64Jpeg) {
+            activity.mainHandler.post(new VisionFrameResultTask(activity.webView, base64Jpeg, null));
+        }
+        @Override
+        public void onError(String message) {
+            activity.mainHandler.post(new VisionFrameResultTask(activity.webView, null, message));
+        }
+    }
+
+    public void captureVisionFrame(final boolean useBackCamera) {
+        if (sentinelCamera != null) {
+            sentinelCamera.captureSingleFrame(useBackCamera, new VisionFrameCallback(this));
+        } else {
+            mainHandler.post(new VisionFrameResultTask(webView, null, "Sentinel camera not active"));
+        }
     }
 
     public void triggerCameraSequence() {

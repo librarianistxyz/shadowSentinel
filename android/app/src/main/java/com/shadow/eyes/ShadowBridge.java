@@ -32,7 +32,19 @@ public class ShadowBridge {
 
     @JavascriptInterface
     public boolean isSpeakingNative() {
-        return activity != null && (activity.isNativeSpeaking || (activity.textToSpeech != null && activity.textToSpeech.isSpeaking()));
+        if (activity == null) return false;
+        boolean ttsActive = activity.textToSpeech != null && activity.textToSpeech.isSpeaking();
+        if (!ttsActive && activity.activeUtterances <= 0) {
+            activity.isNativeSpeaking = false;
+        }
+        return activity.isNativeSpeaking || ttsActive;
+    }
+
+    @JavascriptInterface
+    public void captureVisionFrame(final boolean useBackCamera) {
+        if (activity != null) {
+            activity.captureVisionFrame(useBackCamera);
+        }
     }
 
     @JavascriptInterface

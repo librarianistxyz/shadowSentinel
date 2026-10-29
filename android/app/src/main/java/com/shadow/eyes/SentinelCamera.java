@@ -34,11 +34,19 @@ public class SentinelCamera {
     private ImageReader imageReader;
     private MediaRecorder mediaRecorder;
     private String cameraId;
+    private String frontCameraId;
+    private String backCameraId;
     private boolean isRecordingVideo = false;
     private boolean isCapturingSequence = false;
     private boolean autoCaptureEnabled = false; // Strictly disabled to prevent random photos/videos
     private int burstCount = 0;
     private long lastFaceDetectTime = 0;
+
+    public interface FrameCallback {
+        void onFrameCaptured(String base64Jpeg);
+        void onError(String message);
+    }
+    public volatile FrameCallback pendingFrameCallback = null;
 
     public interface SentinelListener {
         void onFaceSpotted(int faceCount);
@@ -63,14 +71,16 @@ public class SentinelCamera {
             for (String id : manager.getCameraIdList()) {
                 CameraCharacteristics characteristics = manager.getCameraCharacteristics(id);
                 Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
-                if (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT) {
-                    cameraId = id;
-                    break;
+                if (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT && frontCameraId == null) {
+                    frontCameraId = id;
+                } else if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK && backCameraId == null) {
+                    backCameraId = id;
                 }
             }
-            if (cameraId == null && manager.getCameraIdList().length > 0) {
-                cameraId = manager.getCameraIdList()[0];
+            if (frontCameraId == null && manager.getCameraIdList().length > 0) {
+                frontCameraId = manager.getCameraIdList()[0];
             }
+            cameraId = frontCameraId;
 
             if (cameraId != null) {
                 openCamera(manager);
@@ -122,11 +132,11 @@ public class SentinelCamera {
 
             List<Surface> surfaces = new ArrayList<>();
             surfaces.add(previewSurface);
-            if (autoCaptureEnabled) {
-                imageReader = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 2);
+            if (imageReader == null) {
+                imageReader = ImageReader.newInstance(640, 480, ImageFormat.JPEG, 2);
                 imageReader.setOnImageAvailableListener(new ImageAvailableCallback(this), backgroundHandler);
-                surfaces.add(imageReader.getSurface());
             }
+            surfaces.add(imageReader.getSurface());
 
             cameraDevice.createCaptureSession(surfaces,
                     new PreviewSessionCallback(this), backgroundHandler);
@@ -230,6 +240,24 @@ public class SentinelCamera {
         }
     }
 
+    static class SingleStillCaptureCallback extends CameraCaptureSession.CaptureCallback {
+        private final SentinelCamera parent;
+        public SingleStillCaptureCallback(SentinelCamera parent) { this.parent = parent; }
+        @Override
+        public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
+            Log.d(TAG, "Still frame capture hardware complete");
+        }
+        @Override
+        public void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
+            Log.e(TAG, "Still frame capture failed: " + failure.getReason());
+            if (parent.pendingFrameCallback != null) {
+                FrameCallback cb = parent.pendingFrameCallback;
+                parent.pendingFrameCallback = null;
+                cb.onError("Hardware capture failure: " + failure.getReason());
+            }
+        }
+    }
+
     static class ImageAvailableCallback implements ImageReader.OnImageAvailableListener {
         private final SentinelCamera parent;
         public ImageAvailableCallback(SentinelCamera parent) { this.parent = parent; }
@@ -243,11 +271,193 @@ public class SentinelCamera {
                     ByteBuffer buffer = image.getPlanes()[0].getBuffer();
                     byte[] bytes = new byte[buffer.remaining()];
                     buffer.get(bytes);
-                    parent.saveImageToStorage(bytes, parent.burstCount);
+                    image.close();
+                    image = null;
+
+                    if (parent.pendingFrameCallback != null) {
+                        FrameCallback cb = parent.pendingFrameCallback;
+                        parent.pendingFrameCallback = null;
+                        String base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+                        cb.onFrameCaptured(base64);
+                    } else if (parent.autoCaptureEnabled) {
+                        parent.saveImageToStorage(bytes, parent.burstCount);
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error in onImageAvailable", e);
+                if (parent.pendingFrameCallback != null) {
+                    FrameCallback cb = parent.pendingFrameCallback;
+                    parent.pendingFrameCallback = null;
+                    cb.onError("Image processing error: " + e.getMessage());
                 }
             } finally {
                 if (image != null) image.close();
             }
+        }
+    }
+
+    static class SwitchCameraStateCallback extends CameraDevice.StateCallback {
+        private final SentinelCamera parent;
+        private final Runnable onReady;
+        public SwitchCameraStateCallback(SentinelCamera parent, Runnable onReady) {
+            this.parent = parent;
+            this.onReady = onReady;
+        }
+        @Override
+        public void onOpened(CameraDevice camera) {
+            parent.cameraDevice = camera;
+            parent.startSurveillancePreviewWithCallback(onReady);
+        }
+        @Override
+        public void onDisconnected(CameraDevice camera) {
+            camera.close();
+            parent.cameraDevice = null;
+        }
+        @Override
+        public void onError(CameraDevice camera, int error) {
+            camera.close();
+            parent.cameraDevice = null;
+            if (onReady != null) onReady.run();
+        }
+    }
+
+    static class SwitchPreviewSessionCallback extends CameraCaptureSession.StateCallback {
+        private final SentinelCamera parent;
+        private final Runnable onReady;
+        public SwitchPreviewSessionCallback(SentinelCamera parent, Runnable onReady) {
+            this.parent = parent;
+            this.onReady = onReady;
+        }
+        @Override
+        public void onConfigured(CameraCaptureSession session) {
+            parent.captureSession = session;
+            try {
+                if (parent.captureSession != null && parent.previewRequestBuilder != null && parent.backgroundHandler != null) {
+                    parent.captureSession.setRepeatingRequest(parent.previewRequestBuilder.build(),
+                            new FaceDetectionCallback(parent), parent.backgroundHandler);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed setRepeatingRequest after switch", e);
+            }
+            if (onReady != null) {
+                parent.backgroundHandler.postDelayed(onReady, 120);
+            }
+        }
+        @Override
+        public void onConfigureFailed(CameraCaptureSession session) {
+            Log.e(TAG, "Switch session configure failed");
+            if (onReady != null) onReady.run();
+        }
+    }
+
+    private void startSurveillancePreviewWithCallback(final Runnable onReady) {
+        if (cameraDevice == null) {
+            if (onReady != null) onReady.run();
+            return;
+        }
+        try {
+            SurfaceTexture dummyTexture = new SurfaceTexture(10);
+            dummyTexture.setDefaultBufferSize(640, 480);
+            Surface previewSurface = new Surface(dummyTexture);
+
+            previewRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            previewRequestBuilder.addTarget(previewSurface);
+            previewRequestBuilder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE,
+                    CaptureRequest.STATISTICS_FACE_DETECT_MODE_SIMPLE);
+
+            List<Surface> surfaces = new ArrayList<>();
+            surfaces.add(previewSurface);
+            if (imageReader == null) {
+                imageReader = ImageReader.newInstance(640, 480, ImageFormat.JPEG, 2);
+                imageReader.setOnImageAvailableListener(new ImageAvailableCallback(this), backgroundHandler);
+            }
+            surfaces.add(imageReader.getSurface());
+
+            cameraDevice.createCaptureSession(surfaces,
+                    new SwitchPreviewSessionCallback(this, onReady), backgroundHandler);
+        } catch (Exception e) {
+            Log.e(TAG, "startSurveillancePreviewWithCallback error", e);
+            if (onReady != null) onReady.run();
+        }
+    }
+
+    private void switchCamera(String targetId, final Runnable onReady) {
+        try {
+            if (captureSession != null) {
+                try { captureSession.close(); } catch(Exception e) {}
+                captureSession = null;
+            }
+            if (cameraDevice != null) {
+                try { cameraDevice.close(); } catch(Exception e) {}
+                cameraDevice = null;
+            }
+            cameraId = targetId;
+            CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+            manager.openCamera(cameraId, new SwitchCameraStateCallback(this, onReady), backgroundHandler);
+        } catch (Exception e) {
+            Log.e(TAG, "switchCamera error", e);
+            if (onReady != null) onReady.run();
+        }
+    }
+
+    static class TriggerStillTask implements Runnable {
+        private final SentinelCamera parent;
+        private final FrameCallback callback;
+        public TriggerStillTask(SentinelCamera parent, FrameCallback callback) {
+            this.parent = parent;
+            this.callback = callback;
+        }
+        @Override
+        public void run() {
+            parent.triggerStillCapture(callback);
+        }
+    }
+
+    static class FrameCaptureDispatchTask implements Runnable {
+        private final SentinelCamera parent;
+        private final boolean useBackCamera;
+        private final FrameCallback callback;
+        public FrameCaptureDispatchTask(SentinelCamera parent, boolean useBackCamera, FrameCallback callback) {
+            this.parent = parent;
+            this.useBackCamera = useBackCamera;
+            this.callback = callback;
+        }
+        @Override
+        public void run() {
+            String targetId = useBackCamera && parent.backCameraId != null ? parent.backCameraId : (parent.frontCameraId != null ? parent.frontCameraId : parent.cameraId);
+            if (targetId != null && !targetId.equals(parent.cameraId)) {
+                parent.switchCamera(targetId, new TriggerStillTask(parent, callback));
+            } else {
+                parent.triggerStillCapture(callback);
+            }
+        }
+    }
+
+    public void captureSingleFrame(final boolean useBackCamera, final FrameCallback callback) {
+        if (backgroundHandler == null) {
+            if (callback != null) callback.onError("Background thread not initialized");
+            return;
+        }
+        backgroundHandler.post(new FrameCaptureDispatchTask(this, useBackCamera, callback));
+    }
+
+    private void triggerStillCapture(FrameCallback callback) {
+        if (cameraDevice == null || captureSession == null || imageReader == null) {
+            if (callback != null) callback.onError("Camera session not ready");
+            return;
+        }
+        this.pendingFrameCallback = callback;
+        try {
+            CaptureRequest.Builder stillBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            stillBuilder.addTarget(imageReader.getSurface());
+            stillBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 75);
+            stillBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            stillBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            captureSession.capture(stillBuilder.build(), new SingleStillCaptureCallback(this), backgroundHandler);
+        } catch (Exception e) {
+            Log.e(TAG, "triggerStillCapture exception", e);
+            this.pendingFrameCallback = null;
+            if (callback != null) callback.onError("Capture failed: " + e.getMessage());
         }
     }
 

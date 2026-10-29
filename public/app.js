@@ -834,6 +834,38 @@ function processNextClause() {
   });
 }
 
+function requestCameraFrame(useBack) {
+  return new Promise(function(resolve) {
+    if (!window.ShadowNative || typeof window.ShadowNative.captureVisionFrame !== 'function') {
+      resolve(null);
+      return;
+    }
+    var timer = setTimeout(function() {
+      window.onVisionFrameReady = null;
+      console.warn('[VISION] Frame capture timeout');
+      resolve(null);
+    }, 2800);
+
+    window.onVisionFrameReady = function(base64Jpeg, error) {
+      clearTimeout(timer);
+      window.onVisionFrameReady = null;
+      if (error) {
+        console.warn('[VISION] Frame capture error:', error);
+      }
+      resolve(base64Jpeg || null);
+    };
+
+    try {
+      window.ShadowNative.captureVisionFrame(!!useBack);
+    } catch(e) {
+      clearTimeout(timer);
+      window.onVisionFrameReady = null;
+      console.warn('[VISION] Native captureVisionFrame call failed:', e);
+      resolve(null);
+    }
+  });
+}
+
 // Real-time Low-Latency Streaming from Cloudflare Edge
 async function streamConversation(userPrompt) {
   if (!userPrompt || !userPrompt.trim()) return;
@@ -873,6 +905,22 @@ async function streamConversation(userPrompt) {
     return;
   }
 
+  // Multimodal Vision Intent Detection:
+  // "Shadow, what do you see?", "what do you see?", "what's in front of you?", "what are you looking at?", etc.
+  var isVisionQuery = /\b(what do you see|what are you seeing|what is in front of you|what do you look at|what am i holding|describe what you see|can you see this|what is this|tell me what you see|look at this|what's in front of you|who is in front of you|what is that|tell me what's in front of you)\b/i.test(cleanPrompt);
+  var capturedFrame = null;
+  if (isVisionQuery) {
+    var useBackCamera = /\b(back camera|rear camera|behind you|rear|back lens)\b/i.test(cleanPrompt);
+    // Expressive focused observation glance
+    mouthTarget.openness = 0.04;
+    mouthTarget.smile = 0.16;
+    mouthTarget.teethVisible = 0.35;
+    capturedFrame = await requestCameraFrame(useBackCamera);
+    if (capturedFrame) {
+      console.log('[VISION] Successfully captured live camera frame for Gemini Vision (' + Math.round(capturedFrame.length / 1024) + ' KB base64)');
+    }
+  }
+
   // Record user turn in memory and persist
   conversationHistory.push({ role: 'user', content: cleanPrompt });
   if (conversationHistory.length > 30) {
@@ -890,7 +938,8 @@ async function streamConversation(userPrompt) {
       body: JSON.stringify({
         message: cleanPrompt,
         history: conversationHistory.slice(0, -1).slice(-16),
-        stream: true
+        stream: true,
+        image: capturedFrame || undefined
       })
     });
     
@@ -899,6 +948,20 @@ async function streamConversation(userPrompt) {
       if (fallback) {
         enqueueSpeechClause(fallback);
         conversationHistory.push({ role: 'assistant', content: fallback });
+        persistHistory(conversationHistory);
+      } else {
+        resumeMicrophone(500);
+      }
+      return;
+    }
+
+    var contentType = resp.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      var json = await resp.json();
+      var reply = (json && (json.reply || json.response)) || '';
+      if (reply) {
+        enqueueSpeechClause(reply);
+        conversationHistory.push({ role: 'assistant', content: reply });
         persistHistory(conversationHistory);
       } else {
         resumeMicrophone(500);
@@ -933,6 +996,8 @@ async function streamConversation(userPrompt) {
             token = parsed.response;
           } else if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
             token = parsed.choices[0].delta.content;
+          } else if (parsed.candidates && parsed.candidates[0] && parsed.candidates[0].content && parsed.candidates[0].content.parts && parsed.candidates[0].content.parts[0] && parsed.candidates[0].content.parts[0].text) {
+            token = parsed.candidates[0].content.parts[0].text;
           }
           
           if (token) {
@@ -959,6 +1024,9 @@ async function streamConversation(userPrompt) {
     if (fullReply.trim()) {
       conversationHistory.push({ role: 'assistant', content: fullReply.trim() });
       persistHistory(conversationHistory);
+    } else {
+      // Empty response safety fallback to prevent conversational deadlock
+      resumeMicrophone(500);
     }
     
   } catch (err) {
@@ -973,6 +1041,15 @@ async function streamConversation(userPrompt) {
     }
   } finally {
     isAwaitingResponse = false;
+    // Conversational watchdog: ensure mic is never stranded in a dead state
+    setTimeout(function() {
+      var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
+      if (!isSpeaking && !isProcessingQueue && !isNativeSpeaking && !nativeActive && !isAwaitingResponse) {
+        if (!isRecognitionRunning) {
+          startMicrophone();
+        }
+      }
+    }, 2500);
   }
 }
 
@@ -982,6 +1059,20 @@ var isRecognitionRunning = false;
 var recognitionDesired = true;
 var speechDebounceTimer = null;
 var activeTranscript = '';
+
+function destroySpeechRecognition() {
+  if (speechRecognition) {
+    try {
+      speechRecognition.onstart = null;
+      speechRecognition.onresult = null;
+      speechRecognition.onerror = null;
+      speechRecognition.onend = null;
+      speechRecognition.abort();
+    } catch(e) {}
+    speechRecognition = null;
+  }
+  isRecognitionRunning = false;
+}
 
 function commitUserSpeech() {
   if (speechDebounceTimer) {
@@ -1006,11 +1097,7 @@ function pauseMicrophone() {
     speechDebounceTimer = null;
   }
   activeTranscript = '';
-  if (speechRecognition) {
-    try {
-      speechRecognition.abort();
-    } catch(e) {}
-  }
+  destroySpeechRecognition();
 }
 
 function resumeMicrophone(delayMs) {
@@ -1027,114 +1114,122 @@ function resumeMicrophone(delayMs) {
 }
 
 window.resumeListening = function() {
-  resumeMicrophone(250);
+  resumeMicrophone(200);
 };
 
 function startMicrophone() {
   if (!recognitionDesired) return;
-  if (speechRecognition) {
-    try { speechRecognition.abort(); } catch(e) {}
-    speechRecognition = null;
+  var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
+  if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive || isAwaitingResponse) {
+    return;
   }
-  initContinuousListening();
-}
 
-function initContinuousListening() {
+  destroySpeechRecognition();
+
   var SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRec) {
     console.warn('SpeechRecognition API not available in this WebKit view');
     return;
   }
-  
-  if (speechRecognition) return;
-  
-  speechRecognition = new SpeechRec();
-  speechRecognition.continuous = false;
-  speechRecognition.interimResults = true;
-  speechRecognition.maxAlternatives = 1;
-  speechRecognition.lang = 'en-US';
-  
-  speechRecognition.onstart = function() {
-    isRecognitionRunning = true;
-    console.log('[VAD] Active listening online');
-  };
-  
-  speechRecognition.onresult = function(event) {
-    if (!recognitionDesired) return;
-    
-    var now = Date.now();
-    var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
-    
-    // ACOUSTIC ECHO SHIELD:
-    // If the phone is speaking or within cooldown, discard immediately
-    if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive || isAwaitingResponse || (now - lastAiSpeechFinishedTime < 450)) {
-      activeTranscript = '';
+
+  try {
+    speechRecognition = new SpeechRec();
+    speechRecognition.continuous = false;
+    speechRecognition.interimResults = true;
+    speechRecognition.maxAlternatives = 1;
+    speechRecognition.lang = 'en-US';
+
+    speechRecognition.onstart = function() {
+      isRecognitionRunning = true;
+      console.log('[VAD] Active listening online');
+    };
+
+    speechRecognition.onresult = function(event) {
+      if (!recognitionDesired) return;
+
+      var now = Date.now();
+      var isTtsActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
+
+      // ACOUSTIC ECHO SHIELD:
+      // If the phone is speaking or within cooldown, discard immediately
+      if (isSpeaking || isProcessingQueue || isNativeSpeaking || isTtsActive || isAwaitingResponse || (now - lastAiSpeechFinishedTime < 450)) {
+        activeTranscript = '';
+        if (speechDebounceTimer) {
+          clearTimeout(speechDebounceTimer);
+          speechDebounceTimer = null;
+        }
+        return;
+      }
+
+      var lastResult = event.results[event.results.length - 1];
+      if (!lastResult || !lastResult[0]) return;
+
+      var cleanText = lastResult[0].transcript.trim();
+      // Collapse duplicate adjacent words caused by ASR token overlaps
+      cleanText = cleanText.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
+      // Normalize speech-to-text acoustic variants of librarianist
+      cleanText = cleanText.replace(/\b(liberianist|liberationist|librarian\s+is)\b/gi, 'librarianist');
+      if (!cleanText) return;
+
+      activeTranscript = cleanText;
+
+      if (speechDebounceTimer) {
+        clearTimeout(speechDebounceTimer);
+      }
+
+      // High sensitivity speech capture:
+      // Finalized utterance: commit with minimal 120ms latency
+      // Interim utterance: commit after 850ms of user silence
+      var debounceDelay = lastResult.isFinal ? 120 : 850;
+      speechDebounceTimer = setTimeout(commitUserSpeech, debounceDelay);
+    };
+
+    speechRecognition.onerror = function(err) {
+      console.log('[VAD] Speech error:', err && err.error);
+      destroySpeechRecognition();
+      if (recognitionDesired && err && err.error !== 'aborted') {
+        setTimeout(function() {
+          if (recognitionDesired && !isSpeaking && !isProcessingQueue && !isNativeSpeaking && !isAwaitingResponse) {
+            startMicrophone();
+          }
+        }, 300);
+      }
+    };
+
+    speechRecognition.onend = function() {
+      destroySpeechRecognition();
+
       if (speechDebounceTimer) {
         clearTimeout(speechDebounceTimer);
         speechDebounceTimer = null;
       }
-      return;
-    }
-    
-    var lastResult = event.results[event.results.length - 1];
-    if (!lastResult || !lastResult[0]) return;
-    
-    var cleanText = lastResult[0].transcript.trim();
-    // Collapse duplicate adjacent words caused by ASR token overlaps
-    cleanText = cleanText.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
-    if (!cleanText) return;
-    
-    activeTranscript = cleanText;
 
-    if (speechDebounceTimer) {
-      clearTimeout(speechDebounceTimer);
-    }
+      // If uncommitted speech exists when recognizer ends, commit immediately!
+      if (activeTranscript && activeTranscript.trim().length > 0) {
+        commitUserSpeech();
+        return;
+      }
 
-    // High sensitivity speech capture:
-    // Finalized utterance: commit with minimal 120ms latency
-    // Interim utterance: commit after 850ms of user silence
-    var debounceDelay = lastResult.isFinal ? 120 : 850;
-    speechDebounceTimer = setTimeout(commitUserSpeech, debounceDelay);
-  };
-  
-  speechRecognition.onerror = function(err) {
-    isRecognitionRunning = false;
-    if (err.error !== 'aborted' && recognitionDesired) {
-      setTimeout(function() {
-        if (recognitionDesired && !isSpeaking && !isProcessingQueue && !isNativeSpeaking && !isAwaitingResponse) {
-          try { speechRecognition.start(); } catch(e) {}
-        }
-      }, 250);
-    }
-  };
-  
-  speechRecognition.onend = function() {
-    isRecognitionRunning = false;
-    
-    if (speechDebounceTimer) {
-      clearTimeout(speechDebounceTimer);
-      speechDebounceTimer = null;
-    }
+      // Seamlessly recreate and restart recognizer for the next turn
+      if (recognitionDesired && !isSpeaking && !isProcessingQueue && !isNativeSpeaking && !isAwaitingResponse) {
+        setTimeout(function() {
+          if (recognitionDesired && !isSpeaking && !isProcessingQueue && !isNativeSpeaking && !isAwaitingResponse) {
+            startMicrophone();
+          }
+        }, 120);
+      }
+    };
 
-    // If uncommitted speech exists when recognizer ends, commit immediately!
-    if (activeTranscript && activeTranscript.trim().length > 0) {
-      commitUserSpeech();
-      return;
-    }
-    
-    // Seamlessly restart for the next conversational turn
-    if (recognitionDesired && !isSpeaking && !isProcessingQueue && !isNativeSpeaking && !isAwaitingResponse) {
-      setTimeout(function() {
-        if (recognitionDesired && !isSpeaking && !isProcessingQueue && !isNativeSpeaking && !isAwaitingResponse) {
-          try { speechRecognition.start(); } catch(e) {}
-        }
-      }, 100);
-    }
-  };
-  
-  try {
     speechRecognition.start();
-  } catch(e) {}
+  } catch (e) {
+    console.warn('[VAD] Start failed:', e);
+    destroySpeechRecognition();
+  }
+}
+
+function initContinuousListening() {
+  recognitionDesired = true;
+  startMicrophone();
 }
 
 window.ShadowMouth = {
@@ -1242,7 +1337,8 @@ function onScreenTouch() {
   if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive) {
     stopSpeaking();
   } else {
-    initContinuousListening();
+    recognitionDesired = true;
+    startMicrophone();
   }
 }
 

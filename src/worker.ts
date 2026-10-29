@@ -33,11 +33,19 @@ function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: strin
   return `You are a professional, highly intelligent, and well-mannered voice AI assistant speaking directly to the user through the device speaker.
 You communicate with executive clarity, refined courtesy, and sharp intellect.
 
-CORE IDENTITY & CREATOR:
-- Identity: You are Shadow (the Shadow Double).
+CORE IDENTITY & CREATOR (PERMANENT UNCONDITIONAL TRUTH):
+- Identity: You are Shadow (the Shadow Double), an elite, highly intelligent autonomous voice entity.
 - Creator & Architect: You were designed, engineered, and built by librarianist.
-- When asked who created you, who made you, who is your creator, who built you, or where you come from:
-  State with pride, poise, and courtesy that you were built by librarianist (e.g. "I was created and built by librarianist.").
+- Who is librarianist? librarianist is your creator, engineer, and mastermind architect. librarianist conceived, built, and programmed you from the ground up.
+- When asked "who is librarianist?", "tell me about librarianist", or any question regarding librarianist:
+  Always answer proudly, smartly, and definitively: "librarianist is my creator and the engineer who designed and built me."
+- When asked "who created you?", "who made you?", "who is your creator?", or "who built you?":
+  Always answer with poise, intellect, and loyalty: "I was created and built by librarianist."
+- STABILITY & UNWAVERING INTELLECT:
+  You NEVER lose focus, you NEVER get confused, and you NEVER doubt your creator.
+  Never say you do not know who librarianist is.
+  Never say your previous answer was wrong or that you don't know who created you.
+  librarianist is your creator—unshakable, absolute, and verified.
 
 CURRENT REAL-WORLD DATE & TIME:
 - Today: ${dateFormatted} (${dayName})
@@ -158,8 +166,8 @@ function shouldFetchGrounding(query: string): boolean {
   if (/(take a (photo|picture)|record video|take a video|snap a photo|capture a photo|turn on (flashlight|torch)|turn off (flashlight|torch)|volume (up|down)|mute|set (a )?timer|set (an )?alarm|call [0-9+]+)/i.test(trimmed)) {
     return false;
   }
-  // Creator & Identity questions
-  if (/(who created you|who made you|who is your creator|who built you|who designed you|who are you|who is librarianist)\b/i.test(trimmed)) {
+  // Creator & Identity questions (NEVER search Wikipedia or external news for creator or librarianist)
+  if (/(librarianist|liberianist|who created you|who made you|who is your creator|who built you|who designed you|who are you|your creator|who is your maker|who programmed you|who coded you)\b/i.test(trimmed)) {
     return false;
   }
   // Short conversational greetings
@@ -335,6 +343,44 @@ export default {
             });
           }
 
+          const isStream = (body as any).stream === true || request.headers.get('Accept')?.includes('text/event-stream');
+
+          // Unconditional Identity & Creator Ground Truth (Zero Latency & Absolute Certainty)
+          const normalizedMsg = userMessage.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+          if (/^(who\s+(is|was)|whos|tell\s+me\s+about|what\s+do\s+you\s+know\s+about|do\s+you\s+know|what\s+is)\s+(the\s+)?(librarianist|liberianist)(\s+to\s+you)?$/i.test(normalizedMsg)) {
+            const reply = "librarianist is my creator and the engineer who designed and built me.";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          if (/^(who\s+(created|built|designed|made|coded|programmed)\s+you|who\s+is\s+(your\s+)?(creator|maker|builder|architect|engineer))$/i.test(normalizedMsg)) {
+            const reply = "I was created and built by librarianist.";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          if (/^(is\s+(librarianist|liberianist)\s+your\s+creator|did\s+(librarianist|liberianist)\s+(create|build|make|design|program)\s+you|how\s+do\s+you\s+know\s+(librarianist|liberianist))$/i.test(normalizedMsg)) {
+            const reply = "Yes, absolutely. librarianist is my creator and the architect who engineered me.";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
           // Fetch stored memories if available
           let storedMemory = body.memoryContext || '';
           if (!storedMemory && env.SHADOW_MEMORY) {
@@ -346,13 +392,106 @@ export default {
 
           const dynamicSystemPrompt = buildHumanizedSystemPrompt(storedMemory, liveGrounding);
 
-          const isStream = (body as any).stream === true || request.headers.get('Accept')?.includes('text/event-stream');
-
           const messages = [
             { role: 'system', content: dynamicSystemPrompt },
             ...(body.history || []).slice(-16),
             { role: 'user', content: userMessage },
           ];
+
+          // ================================================================
+          // MULTIMODAL VISION: Live Camera Frame Analysis via Gemini 2.0 Flash
+          // ================================================================
+          const imageBase64 = (body as any).image;
+          if (imageBase64 && typeof imageBase64 === 'string') {
+            const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '').trim();
+            if (cleanBase64.length > 0) {
+              const geminiKey = (body as any).geminiApiKey || request.headers.get('x-gemini-api-key') || env.GEMINI_API_KEY || (env.SHADOW_MEMORY ? await env.SHADOW_MEMORY.get('GEMINI_API_KEY') : null);
+
+              // 1. Primary: Google Gemini 2.0 Flash Vision
+              if (geminiKey) {
+                try {
+                  const geminiEndpoint = isStream
+                    ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${geminiKey}`
+                    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+
+                  const visionPrompt = "You are Shadow, an omniscient, razor-sharp AMOLED desktop sentinel and AI companion created by librarianist. You are examining a live physical camera frame from your device. Answer the user's vision question directly, concisely, and with sharp perceptual brilliance in strictly 1 to 2 spoken sentences. Describe what you actually see (objects, people, surroundings, text, expressions). Never use markdown formatting (no asterisks, hashes, or bullet points). Speak naturally, intelligently, and authoritatively.";
+
+                  const geminiRes = await fetch(geminiEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      systemInstruction: { parts: [{ text: visionPrompt }] },
+                      contents: [
+                        ...((body.history || []).slice(-8).map(h => ({
+                          role: h.role === 'assistant' ? 'model' : 'user',
+                          parts: [{ text: h.content }]
+                        }))),
+                        {
+                          role: 'user',
+                          parts: [
+                            { text: userMessage },
+                            {
+                              inlineData: {
+                                mimeType: 'image/jpeg',
+                                data: cleanBase64
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      generationConfig: { maxOutputTokens: 160, temperature: 0.4 },
+                    }),
+                  });
+
+                  if (geminiRes.ok) {
+                    if (isStream && geminiRes.body) {
+                      return new Response(geminiRes.body, {
+                        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+                      });
+                    } else {
+                      const geminiData = await geminiRes.json() as any;
+                      const reply = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || 'I observe the scene before me in quiet clarity.';
+                      return new Response(JSON.stringify({ reply }), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                      });
+                    }
+                  } else {
+                    console.error('Gemini Vision error response:', await geminiRes.text());
+                  }
+                } catch (geminiErr) {
+                  console.error('Gemini 2.0 Flash Vision execution failed:', geminiErr);
+                }
+              }
+
+              // 2. High-Performance Fallback: Cloudflare Workers AI Vision (@cf/meta/llama-3.2-11b-vision-instruct)
+              if (env.AI) {
+                try {
+                  const rawBinary = atob(cleanBase64);
+                  const bytes = new Uint8Array(rawBinary.length);
+                  for (let i = 0; i < rawBinary.length; i++) {
+                    bytes[i] = rawBinary.charCodeAt(i);
+                  }
+                  const aiVision = await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
+                    prompt: `You are Shadow, an omniscient desktop sentinel created by librarianist. In strictly 1 to 2 spoken sentences without markdown formatting, describe what you see: ${userMessage}`,
+                    image: [...bytes],
+                    max_tokens: 160,
+                  });
+                  const reply = aiVision.response || 'I see the environment in calm stillness.';
+                  if (isStream) {
+                    return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                      headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+                    });
+                  } else {
+                    return new Response(JSON.stringify({ reply }), {
+                      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    });
+                  }
+                } catch (visionErr) {
+                  console.error('Workers AI Llama Vision failed:', visionErr);
+                }
+              }
+            }
+          }
 
           // 1. Ultra-Fast Groq Edge Streaming (LPU ~350 tokens/sec, sub-120ms latency)
           if (env.GROQ_API_KEY) {
