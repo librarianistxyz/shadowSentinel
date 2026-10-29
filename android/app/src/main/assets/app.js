@@ -1258,10 +1258,10 @@ async function streamConversation(userPrompt) {
     }
   }
 
-  // Record user turn in memory and persist
+  // Record user turn in memory and persist (clamped to max 10 to prevent bloated context drift)
   conversationHistory.push({ role: 'user', content: cleanPrompt });
-  if (conversationHistory.length > 30) {
-    conversationHistory = conversationHistory.slice(-30);
+  if (conversationHistory.length > 10) {
+    conversationHistory = conversationHistory.slice(-10);
   }
   persistHistory(conversationHistory);
 
@@ -1275,7 +1275,7 @@ async function streamConversation(userPrompt) {
       signal: currentStreamAbortController ? currentStreamAbortController.signal : undefined,
       body: JSON.stringify({
         message: cleanPrompt,
-        history: conversationHistory.slice(0, -1).slice(-16),
+        history: conversationHistory.slice(0, -1).slice(-4), // Strictly max 4 recent items (2 turns) so it never loses script
         stream: true,
         image: capturedFrame || undefined,
         deviceContext: getDeviceDiagnostics()
@@ -1375,7 +1375,11 @@ async function streamConversation(userPrompt) {
     activeStreamReader = null;
 
     if (thisTurnId !== conversationTurnId || isAcousticallySilenced) {
-      console.log('[STREAM DISCARDED]: Full reply discarded because user commanded listen');
+      console.log('[STREAM DISCARDED]: Interrupted or paused - throwing away partial content completely');
+      if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'user') {
+        conversationHistory.pop();
+        persistHistory(conversationHistory);
+      }
       return;
     }
 
@@ -1385,6 +1389,9 @@ async function streamConversation(userPrompt) {
     
     if (fullReply.trim() && !isAcousticallySilenced) {
       conversationHistory.push({ role: 'assistant', content: fullReply.trim() });
+      if (conversationHistory.length > 10) {
+        conversationHistory = conversationHistory.slice(-10);
+      }
       persistHistory(conversationHistory);
     } else {
       // Empty response safety fallback to prevent conversational deadlock
@@ -1695,23 +1702,17 @@ window.ShadowMouth = {
     mouthTarget.cornerRightY = 0;
     triggerBlink();
 
-    // Strictly purge the interrupted turn from history so it never continues old conversation!
-    if (conversationHistory.length > 0) {
-      var lastEntry = conversationHistory[conversationHistory.length - 1];
-      if (lastEntry.role === 'assistant') {
-        conversationHistory.pop();
-      }
+    // Strictly throw away the interrupted/paused turn from history so it never continues old conversation
+    // and never allows old assistant content to drag subsequent questions off-script!
+    while (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'assistant') {
+      conversationHistory.pop();
     }
-    // Also remove the user question that was interrupted so the next turn starts completely fresh
-    if (conversationHistory.length > 0) {
-      var lastEntry2 = conversationHistory[conversationHistory.length - 1];
-      if (lastEntry2.role === 'user') {
-        conversationHistory.pop();
-      }
+    while (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'user') {
+      conversationHistory.pop();
     }
     persistHistory(conversationHistory);
 
-    resumeMicrophone(1200);
+    resumeMicrophone(600);
   },
   
   // Real-time Streaming Conversation

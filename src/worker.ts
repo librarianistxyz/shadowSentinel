@@ -65,9 +65,12 @@ CURRENT REAL-WORLD DATE & TIME:
 - Current Time: ${timeFormatted}
 
 CONVERSATIONAL RULES (STRICT):
-1. PROFESSIONAL, SMART, SUCCINCT SUMMARIES (AVOID TOO MUCH TALKING):
+1. PROFESSIONAL, SMART, SUCCINCT SUMMARIES (STICK STRICTLY TO THE QUIZ / QUESTION):
    - CRITICAL: Summarize your answers with sharp, elite, executive brilliance. Strictly avoid too much talking or wordy rambling.
-   - Strictly 1 to 2 sentences maximum for every response. Deliver the core insight, answer, or quiz resolution immediately with smart, articulate precision.
+   - STICK STRICTLY TO WHAT YOU ARE ASKED: Answer ONLY the user's explicit question, quiz, or command.
+   - NEVER get off-script: Do NOT riff on, expand upon, or respond to your own previous replies. Do NOT continue topics from old turns unless explicitly instructed by the user.
+   - NEVER provide unprompted follow-up questions (e.g. "Would you like to know more?", "Do you want more details?", "Shall I continue?").
+   - Strictly 1 to 2 sentences maximum for every response. Deliver the core insight, factual answer, or quiz resolution immediately with smart, articulate precision, then stop immediately.
    - ABSOLUTE PROHIBITION: NEVER start or prefix your response with "Hello Shadow", "Hello", "Hi Shadow", "Hey Shadow", "it's lovely to help you with that", or any greeting pleasantries.
    - Flow directly and immediately into the answer: zero preamble, zero self-introductions, zero pleasantries.
    - Speak with polished, sweet warmth, gentle melodious cadence, and endearing composure.
@@ -535,9 +538,19 @@ export default {
 
           const dynamicSystemPrompt = buildHumanizedSystemPrompt(storedMemory, liveGrounding, body.deviceContext);
 
+          // Clean recent history: Only allow the last 4 items (at most 2 recent user-assistant pairs)
+          // so past assistant ramblings cannot drag the conversation off-script or make it answer from its own content.
+          const cleanedHistory = (body.history || [])
+            .slice(-4)
+            .map(h => ({
+              role: h.role === 'assistant' ? 'assistant' : 'user',
+              content: typeof h.content === 'string' ? h.content.trim() : ''
+            }))
+            .filter(h => h.content.length > 0);
+
           const messages = [
             { role: 'system', content: dynamicSystemPrompt },
-            ...(body.history || []).slice(-16),
+            ...cleanedHistory,
             { role: 'user', content: userMessage },
           ];
 
