@@ -923,6 +923,7 @@ var isProcessingQueue = false;
 var isAwaitingResponse = false;
 var isNativeSpeaking = false;
 var lastAiSpeechFinishedTime = 0;
+var lastAssistantSpokenText = "";
 var currentStreamAbortController = null;
 var activeStreamReader = null;
 var isAcousticallySilenced = false;
@@ -1053,6 +1054,11 @@ function enqueueSpeechClause(clause) {
   }
   var clean = sanitizeSpeechText(clause);
   if (!clean) return;
+  if (!lastAssistantSpokenText) {
+    lastAssistantSpokenText = clean;
+  } else {
+    lastAssistantSpokenText += " " + clean;
+  }
   clauseQueue.push(clean);
   if (!isProcessingQueue && !isSpeaking) {
     processNextClause();
@@ -1153,6 +1159,7 @@ async function streamConversation(userPrompt) {
 
   // A genuine new question or command has arrived! Clear silenced flag and advance turn ID:
   isAcousticallySilenced = false;
+  lastAssistantSpokenText = "";
   conversationTurnId++;
   var thisTurnId = conversationTurnId;
 
@@ -1398,6 +1405,7 @@ async function streamConversation(userPrompt) {
     }
     
     if (fullReply.trim() && !isAcousticallySilenced) {
+      lastAssistantSpokenText = fullReply.trim();
       conversationHistory.push({ role: 'assistant', content: fullReply.trim() });
       if (conversationHistory.length > 10) {
         conversationHistory = conversationHistory.slice(-10);
@@ -1799,8 +1807,48 @@ window.ShadowMouth = {
     console.log('[DIRECT VOICE COMMAND RECEIVED]:', speechText);
     if (!speechText || !speechText.trim()) return;
 
+    var now = Date.now();
+    var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
+
+    // 1. Acoustic Shield: Block recognition if Shadow is actively speaking or processing a speech queue
+    if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive || isAwaitingResponse) {
+      console.log('[SPEECH BLOCKED]: Discarded recognition while Shadow is speaking or awaiting response');
+      return;
+    }
+
+    // 2. Acoustic Shield: Block recognition within 850ms of assistant finishing speech
+    if (now - lastAiSpeechFinishedTime < 850) {
+      console.log('[SPEECH BLOCKED]: Acoustic echo within 850ms of TTS finish discarded (' + (now - lastAiSpeechFinishedTime) + 'ms)');
+      return;
+    }
+
+    // 3. Acoustic Shield: Discard recognition matching Shadow's own recent spoken text (speaker feedback echo)
+    if (lastAssistantSpokenText) {
+      var normSpoken = speechText.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+      var normLast = lastAssistantSpokenText.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+      if (normSpoken && normLast) {
+        if (normLast.indexOf(normSpoken) !== -1 || normSpoken.indexOf(normLast) !== -1) {
+          console.log('[SPEECH BLOCKED]: Acoustic echo matched last spoken text:', speechText);
+          return;
+        }
+        var sWords = normSpoken.split(/\s+/);
+        if (sWords.length >= 3) {
+          var matchedWords = 0;
+          for (var w = 0; w < sWords.length; w++) {
+            if (sWords[w].length >= 3 && normLast.indexOf(sWords[w]) !== -1) {
+              matchedWords++;
+            }
+          }
+          if (matchedWords >= sWords.length * 0.6) {
+            console.log('[SPEECH BLOCKED]: Acoustic echo high word overlap (' + matchedWords + '/' + sWords.length + ') with last spoken text');
+            return;
+          }
+        }
+      }
+    }
+
     // Reject acoustic residue within 500ms of an interruption
-    if (Date.now() - lastInterruptionTime < 500) {
+    if (now - lastInterruptionTime < 500) {
       console.log('[SPEECH BLOCKED]: Acoustic residue within 500ms of interruption discarded');
       return;
     }

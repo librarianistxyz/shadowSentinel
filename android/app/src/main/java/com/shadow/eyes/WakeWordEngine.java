@@ -42,6 +42,8 @@ public class WakeWordEngine {
     private volatile boolean isPaused = false;
     private volatile boolean isListening = false;
     private volatile boolean isInterruptionOnlyMode = false; // When true (during speech), only barge-in triggers like "listen" are processed
+    private volatile long lastTtsEndTime = 0;
+    private ClearInterruptionModeTask pendingClearInterruptionTask = null;
 
     private long lastWakeTriggerTime = 0;
 
@@ -107,6 +109,10 @@ public class WakeWordEngine {
     }
 
     public synchronized void setInterruptionOnlyMode(boolean active) {
+        if (pendingClearInterruptionTask != null) {
+            mainHandler.removeCallbacks(pendingClearInterruptionTask);
+            pendingClearInterruptionTask = null;
+        }
         this.isInterruptionOnlyMode = active;
         Log.d(TAG, "Interruption-only mode set to: " + active);
         if (active) {
@@ -115,6 +121,17 @@ public class WakeWordEngine {
                 mainHandler.postDelayed(new StartListeningTask(this), 150);
             }
         }
+    }
+
+    public synchronized void notifyTtsFinished() {
+        this.lastTtsEndTime = System.currentTimeMillis();
+        this.isInterruptionOnlyMode = true; // Retain interruption mode during acoustic decay window
+        if (pendingClearInterruptionTask != null) {
+            mainHandler.removeCallbacks(pendingClearInterruptionTask);
+        }
+        pendingClearInterruptionTask = new ClearInterruptionModeTask(this);
+        mainHandler.postDelayed(pendingClearInterruptionTask, 800);
+        Log.d(TAG, "TTS finished reported. Interruption shield active for 800ms acoustic decay.");
     }
 
     public boolean isInterruptionOnlyMode() {
@@ -231,6 +248,21 @@ public class WakeWordEngine {
     // =========================================================================
     // STATIC NAMED TASKS & LISTENER (STRICT D8 COMPATIBILITY)
     // =========================================================================
+
+    static class ClearInterruptionModeTask implements Runnable {
+        private final WeakReference<WakeWordEngine> engineRef;
+        public ClearInterruptionModeTask(WakeWordEngine engine) {
+            this.engineRef = new WeakReference<>(engine);
+        }
+        @Override
+        public void run() {
+            WakeWordEngine engine = engineRef.get();
+            if (engine != null) {
+                engine.isInterruptionOnlyMode = false;
+                Log.d(TAG, "Interruption-only mode auto-cleared after acoustic decay cooldown");
+            }
+        }
+    }
 
     static class StartListeningTask implements Runnable {
         private final WeakReference<WakeWordEngine> engineRef;
@@ -372,7 +404,10 @@ public class WakeWordEngine {
                     }
                 }
 
-                if (!engine.isInterruptionOnlyMode) {
+                long timeSinceTts = System.currentTimeMillis() - engine.lastTtsEndTime;
+                if (engine.isInterruptionOnlyMode || timeSinceTts < 800) {
+                    Log.d(TAG, "Acoustic echo shield: Discarded recognition within " + timeSinceTts + "ms of TTS finish or during speech (" + matches.get(0) + ")");
+                } else {
                     String best = matches.get(0).trim();
                     if (best.length() > 0) {
                         engine.handleSpeechRecognizedInternal(best);
