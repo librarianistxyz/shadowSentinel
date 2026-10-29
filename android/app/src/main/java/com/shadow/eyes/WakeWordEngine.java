@@ -29,6 +29,7 @@ public class WakeWordEngine {
     public interface WakeWordListener {
         void onWakeWord(String detectedPhrase, String trailingCommand);
         void onFollowUpSpeech(String speechText);
+        void onInterruptionRequested();
         void onListeningStateChanged(boolean isListening);
         void onWakeWordRmsChanged(float rmsDb);
     }
@@ -57,9 +58,17 @@ public class WakeWordEngine {
     private volatile boolean isListening = false;
     private volatile boolean isTriggered = false;
     private volatile boolean isFollowUpMode = true; // Alert conversational state active by default
+    private volatile boolean isInterruptionOnlyMode = false; // When true (during speech), only barge-in triggers like "listen" are processed
 
     private long lastWakeTriggerTime = 0;
     private static final long WAKE_COOLDOWN_MS = 1500;
+
+    // Acoustic Barge-in Interruption Pattern:
+    // User commands: "listen", "hey listen", "listen shadow", "shadow listen", "stop", "stop talking", "quiet", "be quiet", "wait", "hold on", "shh"
+    private static final Pattern INTERRUPT_PATTERN = Pattern.compile(
+        "\\b(listen|hey\\s+listen|listen\\s+shadow|shadow\\s+listen|stop|stop\\s+talking|quiet|be\\s+quiet|hold\\s+on|shh|hush|wait|shut\\s+up|pause|silence)\\b",
+        Pattern.CASE_INSENSITIVE
+    );
 
     // Multi-trigger pattern: conversational greetings, wake commands, and name triggers
     // Matches "hey hello", "hello", "hi", "hey", "wake up", "are you there", "good morning", "hey shadow", etc.
@@ -135,8 +144,30 @@ public class WakeWordEngine {
         return isFollowUpMode;
     }
 
+    public synchronized void setInterruptionOnlyMode(boolean active) {
+        this.isInterruptionOnlyMode = active;
+        Log.d(TAG, "Interruption-only mode set to: " + active);
+        if (active) {
+            if (isRunning && isPaused) {
+                isPaused = false;
+                mainHandler.postDelayed(new StartListeningTask(this), 150);
+            }
+        }
+    }
+
+    public boolean isInterruptionOnlyMode() {
+        return isInterruptionOnlyMode;
+    }
+
     public boolean isListening() {
         return isListening && isRunning && !isPaused;
+    }
+
+    public static boolean checkInterrupt(String input) {
+        if (input == null || input.trim().isEmpty()) {
+            return false;
+        }
+        return INTERRUPT_PATTERN.matcher(input.trim()).find();
     }
 
     public static WakeMatchResult checkWakeWord(String input) {
@@ -265,6 +296,20 @@ public class WakeWordEngine {
             listener.onFollowUpSpeech(speechText);
         }
         pause();
+    }
+
+    void handleInterruptionInternal() {
+        long now = System.currentTimeMillis();
+        if (now - lastWakeTriggerTime < 400) {
+            return;
+        }
+        lastWakeTriggerTime = now;
+        isInterruptionOnlyMode = false;
+        Log.i(TAG, "ACOUSTIC BARGE-IN INTERRUPTION TRIGGERED! User commanded 'listen' / 'quiet'");
+        if (listener != null) {
+            listener.onInterruptionRequested();
+        }
+        scheduleRestart(250);
     }
 
     // =========================================================================
@@ -404,6 +449,14 @@ public class WakeWordEngine {
             ArrayList<String> matches = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches != null) {
                 for (String text : matches) {
+                    if (checkInterrupt(text)) {
+                        engine.handleInterruptionInternal();
+                        return;
+                    }
+                    if (engine.isInterruptionOnlyMode) {
+                        // While in interruption-only mode, only barge-in words can trigger
+                        continue;
+                    }
                     WakeMatchResult match = checkWakeWord(text);
                     if (match.matched) {
                         // When slumbering (!isFollowUpMode), trigger instant wake from partial match.
@@ -427,17 +480,26 @@ public class WakeWordEngine {
                 ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 if (matches != null && !matches.isEmpty()) {
                     for (String text : matches) {
-                        WakeMatchResult match = checkWakeWord(text);
-                        if (match.matched) {
-                            engine.handleWakeWordInternal(match.phrase, match.trailingCommand);
+                        if (checkInterrupt(text)) {
+                            engine.handleInterruptionInternal();
                             return;
                         }
                     }
-                    if (engine.isFollowUpMode) {
-                        String best = matches.get(0).trim();
-                        if (best.length() > 0) {
-                            engine.handleFollowUpInternal(best);
-                            return;
+
+                    if (!engine.isInterruptionOnlyMode) {
+                        for (String text : matches) {
+                            WakeMatchResult match = checkWakeWord(text);
+                            if (match.matched) {
+                                engine.handleWakeWordInternal(match.phrase, match.trailingCommand);
+                                return;
+                            }
+                        }
+                        if (engine.isFollowUpMode) {
+                            String best = matches.get(0).trim();
+                            if (best.length() > 0) {
+                                engine.handleFollowUpInternal(best);
+                                return;
+                            }
                         }
                     }
                 }

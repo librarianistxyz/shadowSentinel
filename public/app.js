@@ -1101,6 +1101,23 @@ async function streamConversation(userPrompt) {
 
   // Manual Sentinel Lockdown & Slumber Voice Commands
   var cleanPrompt = userPrompt.trim();
+
+  // Direct Acoustic Interruption / Keep Quiet command ("listen", "hey listen", "shadow listen", "be quiet", "stop talking", "hush", "wait", etc.)
+  var isListenInterrupt = /^(?:shadow\s*,?\s*)?(?:listen|hey\s+listen|listen\s+shadow|be\s+quiet|quiet|hush|hold\s+on|wait|stop\s+talking|shut\s+up|silence|pause)[.!?]?$/i.test(cleanPrompt);
+  if (isListenInterrupt) {
+    console.log('[LISTEN INTERRUPT]: Interrupted with "' + cleanPrompt + '" - keeping completely quiet and awaiting next command');
+    stopSpeaking();
+    maintainActiveConversation();
+    idleGazeDirection.x = 0;
+    idleGazeDirection.y = 0;
+    mouthTarget.openness = 0.0;
+    mouthTarget.smile = 0.04;
+    mouthTarget.teethVisible = 0.0;
+    triggerBlink();
+    isAwaitingResponse = false;
+    resumeMicrophone(300);
+    return;
+  }
   if (/^(?:sentinel\s+)?(?:enter\s+)?(?:lockdown|slumber|slumber\s+mode|sleep\s+mode|go\s+to\s+sleep)[.!?]?$/i.test(cleanPrompt)) {
     enterSilentSentinelMode();
     var sleepReply = "Sentinel lockdown engaged. Entering slumber.";
@@ -1563,6 +1580,20 @@ window.ShadowMouth = {
 
   // Instant Interruption / Barge-in
   stop: stopSpeaking,
+
+  // Acoustic Interruption ("listen", "be quiet", "stop") triggered while speaking
+  onAcousticInterrupted: function() {
+    console.log('[ACOUSTIC INTERRUPTED]: User commanded "listen" / "quiet" - silencing mouth immediately');
+    stopSpeaking();
+    maintainActiveConversation();
+    idleGazeDirection.x = 0;
+    idleGazeDirection.y = 0;
+    mouthTarget.openness = 0.0;
+    mouthTarget.smile = 0.04;
+    mouthTarget.teethVisible = 0.0;
+    triggerBlink();
+    resumeMicrophone(300);
+  },
   
   // Real-time Streaming Conversation
   streamConversation: streamConversation,

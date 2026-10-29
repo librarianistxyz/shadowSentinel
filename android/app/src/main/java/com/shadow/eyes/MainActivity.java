@@ -189,6 +189,10 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             activity.handleFollowUpSpeech(speechText);
         }
         @Override
+        public void onInterruptionRequested() {
+            activity.handleAcousticInterruption();
+        }
+        @Override
         public void onListeningStateChanged(boolean isListening) {
             activity.notifyWakeWordState(isListening);
         }
@@ -206,7 +210,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             activity.isNativeSpeaking = true;
             activity.notifyNativeSpeechState(true);
             if (activity.wakeWordEngine != null) {
-                activity.wakeWordEngine.pause();
+                activity.wakeWordEngine.setInterruptionOnlyMode(true);
             }
         }
         @Override
@@ -218,6 +222,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 activity.isNativeSpeaking = false;
                 activity.notifyNativeSpeechState(false);
                 if (activity.wakeWordEngine != null) {
+                    activity.wakeWordEngine.setInterruptionOnlyMode(false);
                     activity.wakeWordEngine.resume();
                 }
             }
@@ -231,6 +236,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 activity.isNativeSpeaking = false;
                 activity.notifyNativeSpeechState(false);
                 if (activity.wakeWordEngine != null) {
+                    activity.wakeWordEngine.setInterruptionOnlyMode(false);
                     activity.wakeWordEngine.resume();
                 }
             }
@@ -331,8 +337,17 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (activity == null) return;
+            if ("com.shadow.eyes.INTERRUPT".equals(intent.getAction()) || intent.getBooleanExtra("interrupt", false)) {
+                activity.handleAcousticInterruption();
+                return;
+            }
             String prompt = intent.getStringExtra("prompt");
-            if (prompt != null && activity != null && activity.webView != null) {
+            if (prompt != null && activity.webView != null) {
+                if (WakeWordEngine.checkInterrupt(prompt)) {
+                    activity.handleAcousticInterruption();
+                    return;
+                }
                 android.util.Log.d("ShadowEyes", "Received test prompt broadcast: " + prompt);
                 activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.streamConversation(" + org.json.JSONObject.quote(prompt) + ");", null);
             }
@@ -369,7 +384,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         sentinelCamera = new SentinelCamera(this, this);
         wakeWordEngine = new WakeWordEngine(this, new ShadowWakeWordListener(this));
 
-        registerReceiver(new PromptReceiver(this), new IntentFilter("com.shadow.eyes.TEST_PROMPT"));
+        IntentFilter promptFilter = new IntentFilter("com.shadow.eyes.TEST_PROMPT");
+        promptFilter.addAction("com.shadow.eyes.INTERRUPT");
+        registerReceiver(new PromptReceiver(this), promptFilter);
 
         if (hasAllPermissions()) {
             sentinelCamera.start();
@@ -644,6 +661,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     activity.activeUtterances++;
                     activity.isNativeSpeaking = true;
                     activity.notifyNativeSpeechState(true);
+                    if (activity.wakeWordEngine != null) {
+                        activity.wakeWordEngine.setInterruptionOnlyMode(true);
+                    }
                     activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, null, "shadow_speech_" + System.currentTimeMillis());
                 }
             }
@@ -661,6 +681,40 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             activity.activeUtterances = 0;
             activity.isNativeSpeaking = false;
             activity.notifyNativeSpeechState(false);
+            if (activity.wakeWordEngine != null) {
+                activity.wakeWordEngine.setInterruptionOnlyMode(false);
+                activity.wakeWordEngine.resume();
+            }
+        }
+    }
+
+    static class AcousticInterruptionTask implements Runnable {
+        private final MainActivity activity;
+        public AcousticInterruptionTask(MainActivity activity) { this.activity = activity; }
+        @Override
+        public void run() {
+            if (activity == null) return;
+            android.util.Log.i("ShadowEyes", "Acoustic interruption received ('listen' / 'quiet') - stopping speech and silencing Shadow");
+            activity.stopSpeaking();
+            if (activity.wakeWordEngine != null) {
+                activity.wakeWordEngine.setInterruptionOnlyMode(false);
+                activity.wakeWordEngine.setFollowUpMode(true);
+                activity.wakeWordEngine.resume();
+            }
+            // Subtle 35ms haptic confirmation
+            try {
+                if (activity.vibrator != null && activity.vibrator.hasVibrator()) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        activity.vibrator.vibrate(android.os.VibrationEffect.createOneShot(35, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                    } else {
+                        activity.vibrator.vibrate(35);
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            if (activity.webView != null) {
+                activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.onAcousticInterrupted && window.ShadowMouth.onAcousticInterrupted();", null);
+            }
         }
     }
 
@@ -1172,6 +1226,10 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
 
     public void stopSpeaking() {
         mainHandler.post(new StopSpeakTask(this));
+    }
+
+    public void handleAcousticInterruption() {
+        mainHandler.post(new AcousticInterruptionTask(this));
     }
 
     public void speak(final String text) {
