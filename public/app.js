@@ -593,8 +593,15 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   var maxTravelY = isSentinelLockdown ? 3 : 10;
   var curGazeDx = isSentinelLockdown ? (gazeDx * 0.25) : gazeDx;
   var curGazeDy = isSentinelLockdown ? 0.35 : gazeDy; // resting gently downward in slumber
+
+  // Right eye is smaller/narrower vertically (height 46px vs 57px on left eye),
+  // so adapt upward travel proportionally so the pupil stays inside the socket:
+  var effectiveTravelYUp = isLeftEye ? maxTravelY : (maxTravelY * 0.50);
+  var effectiveTravelYDown = maxTravelY;
+  var travelY = curGazeDy < 0 ? (curGazeDy * effectiveTravelYUp) : (curGazeDy * effectiveTravelYDown);
+
   var pupilX = restPupil[0] + Math.max(-maxTravelX, Math.min(maxTravelX, curGazeDx * maxTravelX));
-  var pupilY = restPupil[1] + Math.max(-maxTravelY, Math.min(maxTravelY, curGazeDy * maxTravelY));
+  var pupilY = restPupil[1] + travelY;
 
   // Solid Black Pupil
   ctx.beginPath();
@@ -602,11 +609,56 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   ctx.fillStyle = '#000000';
   ctx.fill();
 
-  // Primary Specular Catchlight (dims during slumber)
-  var catchAlpha = Math.max(0.10, slumberAlpha * (isSentinelLockdown ? 0.32 : 1.0));
+  // Find eye bounds for shadow and lid
+  var minY = 999;
+  var maxY = -999;
+  var minX = 999;
+  var maxX = -999;
+  for (var i = 0; i < contour.length; i++) {
+    var p = contour[i];
+    if (p[0] < minX) minX = p[0];
+    if (p[0] > maxX) maxX = p[0];
+    if (p[1] < minY) minY = p[1];
+    if (p[1] > maxY) maxY = p[1];
+  }
+
+  // 3. Eyelid Drop Shadow (scaled to eye height so it does not swamp the smaller right eye)
+  var shadowDepth = (maxY - minY) * (isLeftEye ? 0.30 : 0.22);
+  var shadowGrad = ctx.createLinearGradient(0, minY, 0, minY + shadowDepth);
+  shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
+  shadowGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.30)');
+  shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = shadowGrad;
+  ctx.fillRect(minX - 5, minY - 5, (maxX - minX) + 10, shadowDepth + 5);
+
+  // 4. Primary Specular Catchlight (drawn on top of shadow so the inner white dot is ALWAYS gleaming and never hidden)
+  var catchX = pupilX + pupilRadius * 0.35;
+  var catchOffsetY = (curGazeDy < 0) ? (pupilRadius * 0.12) : (pupilRadius * 0.25);
+  var catchY = pupilY - catchOffsetY;
+
+  // Local upper lid boundary guard: ensure catchlight is safely below the upper contour edge
+  var localTopY = 999;
+  for (var i = 0; i < contour.length; i++) {
+    if (Math.abs(contour[i][0] - catchX) < 8) {
+      if (contour[i][1] < localTopY) {
+        localTopY = contour[i][1];
+      }
+    }
+  }
+  if (localTopY < 900 && catchY < localTopY + 3.8) {
+    catchY = localTopY + 3.8;
+  }
+
+  var catchAlpha = Math.max(0.15, slumberAlpha * (isSentinelLockdown ? 0.32 : 1.0));
   ctx.beginPath();
-  ctx.arc(pupilX + pupilRadius * 0.35, pupilY - pupilRadius * 0.25, 2.8, 0, Math.PI * 2);
+  ctx.arc(catchX, catchY, 2.8, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(255, 255, 255, ' + catchAlpha + ')';
+  ctx.fill();
+
+  // Secondary soft specular sheen (gives depth and life to the pupil)
+  ctx.beginPath();
+  ctx.arc(catchX - 3.2, catchY + 2.8, 1.4, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, ' + (catchAlpha * 0.65) + ')';
   ctx.fill();
 
   // =========================================================================
@@ -633,27 +685,7 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
     ctx.fill();
   }
 
-  // 3. Eyelid Drop Shadow
-  var minY = 999;
-  var maxY = -999;
-  var minX = 999;
-  var maxX = -999;
-  for (var i = 0; i < contour.length; i++) {
-    var p = contour[i];
-    if (p[0] < minX) minX = p[0];
-    if (p[0] > maxX) maxX = p[0];
-    if (p[1] < minY) minY = p[1];
-    if (p[1] > maxY) maxY = p[1];
-  }
-
-  var shadowGrad = ctx.createLinearGradient(0, minY, 0, minY + 18);
-  shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.9)');
-  shadowGrad.addColorStop(0.6, 'rgba(0, 0, 0, 0.35)');
-  shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = shadowGrad;
-  ctx.fillRect(minX - 5, minY - 5, (maxX - minX) + 10, 24);
-
-  // 4. Heavy Hooded Slumber Eyelid & Natural Blink
+  // 5. Heavy Hooded Slumber Eyelid & Natural Blink
   var effectiveLid = Math.min(1.0, blink + slumberProgress * 0.74);
   if (effectiveLid > 0.01) {
     var currentLidY = minY + (maxY - minY + 10) * effectiveLid;
