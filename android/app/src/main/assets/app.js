@@ -132,14 +132,20 @@ var mouthTarget = {
   pucker: 0.0
 };
 
-// Idle natural expressions
+// Rich Expressive Emotional Gestures (Smiling, Angry, Frustrated, Curious & More)
 var IDLE_MOUTH_EXPRESSIONS = [
-  { name: 'neutral',        openness: 0.0,  widthRatio: 1.00, cornerLeftY: 0,  cornerRightY: 0,  teethVisible: 0.0,  smile: 0.04 },
-  { name: 'smirk_right',    openness: 0.04, widthRatio: 1.08, cornerLeftY: -1, cornerRightY: -6, teethVisible: 0.15, smile: 0.14 },
-  { name: 'smirk_left',     openness: 0.03, widthRatio: 1.05, cornerLeftY: -5, cornerRightY: 0,  teethVisible: 0.10, smile: 0.11 },
-  { name: 'predator_grin',  openness: 0.18, widthRatio: 1.22, cornerLeftY: -6, cornerRightY: -7, teethVisible: 0.60, smile: 0.24 },
-  { name: 'slight_part',    openness: 0.08, widthRatio: 0.98, cornerLeftY: 0,  cornerRightY: 0,  teethVisible: 0.25, smile: 0.02 },
-  { name: 'pensive',        openness: 0.0,  widthRatio: 0.94, cornerLeftY: 2,  cornerRightY: 1,  teethVisible: 0.0,  smile: -0.04 }
+  { name: 'neutral',            openness: 0.0,  widthRatio: 1.00, cornerLeftY: 0,   cornerRightY: 0,   teethVisible: 0.0,  smile: 0.04 },
+  { name: 'smiling_warm',       openness: 0.04, widthRatio: 1.16, cornerLeftY: -5,  cornerRightY: -5,  teethVisible: 0.35, smile: 0.22 },
+  { name: 'smiling_wide',       openness: 0.22, widthRatio: 1.34, cornerLeftY: -8,  cornerRightY: -8,  teethVisible: 0.90, smile: 0.36 },
+  { name: 'smiling_devious',    openness: 0.08, widthRatio: 1.22, cornerLeftY: -2,  cornerRightY: -8,  teethVisible: 0.65, smile: 0.26 },
+  { name: 'curious_analyzing',  openness: 0.03, widthRatio: 0.92, cornerLeftY: 2,   cornerRightY: -5,  teethVisible: 0.15, smile: 0.08 },
+  { name: 'thoughtful_pucker',  openness: 0.02, widthRatio: 0.82, cornerLeftY: 1,   cornerRightY: 1,   teethVisible: 0.0,  smile: -0.04 },
+  { name: 'angry_snarl',        openness: 0.16, widthRatio: 1.26, cornerLeftY: 4,   cornerRightY: 4,   teethVisible: 0.95, smile: -0.22 },
+  { name: 'angry_growl',        openness: 0.07, widthRatio: 1.10, cornerLeftY: 5,   cornerRightY: 3,   teethVisible: 0.75, smile: -0.28 },
+  { name: 'frustrated_grimace', openness: 0.05, widthRatio: 1.12, cornerLeftY: 3.5, cornerRightY: 3.5, teethVisible: 0.65, smile: -0.16 },
+  { name: 'frustrated_pout',    openness: 0.0,  widthRatio: 0.86, cornerLeftY: 5,   cornerRightY: 5,   teethVisible: 0.0,  smile: -0.25 },
+  { name: 'surprised',          openness: 0.36, widthRatio: 0.82, cornerLeftY: 1,   cornerRightY: 1,   teethVisible: 0.20, smile: 0.02 },
+  { name: 'smug_villain',       openness: 0.05, widthRatio: 1.14, cornerLeftY: 0,   cornerRightY: -7,  teethVisible: 0.45, smile: 0.18 }
 ];
 
 var nextIdleMouthTime = 0;
@@ -324,21 +330,78 @@ async function requestScreenLock() {
 document.addEventListener('click', requestScreenLock, { once: true });
 document.addEventListener('touchstart', requestScreenLock, { once: true });
 
-// Idle glance directions
-var IDLE_LOOK_DIRECTIONS = [
-  { x: 0, y: 0 },         // Direct eye contact
-  { x: 0.8, y: -0.3 },    // Glancing top-right
-  { x: -0.8, y: -0.3 },   // Glancing top-left
-  { x: 0.9, y: 0.15 },    // Looking right
-  { x: -0.9, y: 0.15 },   // Looking left
-  { x: 0, y: 0.6 },       // Looking down
-  { x: 0, y: 0 }          // Direct eye contact
-];
+// ==============================================================================
+// SILKY-SMOOTH CURIOUS FACIAL SCANNING SYSTEM
+// Moves smoothly side to side, analyzing someone in curiosity
+// ==============================================================================
+var curiousScanSpeed = 0.0011; // smooth calculating scan pace
+var curiousMode = 'scanning';  // 'scanning', 'focal_lock', 'inquisitive_tilt'
+var curiousModeTimer = 0;
+var curiousPupilDilation = 0.0; // expands slightly when analyzing in curiosity
 
-function pickIdleGlance() {
-  var chosen = IDLE_LOOK_DIRECTIONS[Math.floor(Math.random() * IDLE_LOOK_DIRECTIONS.length)];
-  idleGazeDirection.x = chosen.x;
-  idleGazeDirection.y = chosen.y;
+function updateCuriousGaze(now, curCenterX, curCenterY) {
+  if (isSentinelLockdown) {
+    // Resting downward gaze in slumber
+    userGaze.x += (curCenterX - userGaze.x) * 0.05;
+    userGaze.y += (curCenterY + height * 0.08 - userGaze.y) * 0.05;
+    curiousPupilDilation += (0.0 - curiousPupilDilation) * 0.05;
+    return;
+  }
+
+  // Smooth time-based curiosity wave
+  var t = now * curiousScanSpeed;
+
+  // Change curiosity sub-mode periodically
+  if (now > curiousModeTimer) {
+    var rand = Math.random();
+    if (rand < 0.50) {
+      curiousMode = 'scanning';           // Silky side-to-side sweeping scan
+      curiousModeTimer = now + 4200 + Math.random() * 3800;
+    } else if (rand < 0.78) {
+      curiousMode = 'focal_lock';         // Sharp direct eye contact, intensely analyzing
+      curiousModeTimer = now + 2400 + Math.random() * 2200;
+      if (Math.random() < 0.4) triggerBlink();
+    } else {
+      curiousMode = 'inquisitive_tilt';   // Curious head/gaze tilt upwards/downwards
+      curiousModeTimer = now + 2800 + Math.random() * 2400;
+    }
+  }
+
+  var targetNormX = 0;
+  var targetNormY = 0;
+
+  if (curiousMode === 'scanning') {
+    // Multi-harmonic smooth sine sweep: sweeps left, lingers gently, sweeps right, lingers
+    // Primary scan sweeps left-to-right (-0.72 to +0.72)
+    // Secondary harmonic adds realistic micro-hesitations at the corners of the subject's face
+    var sweep = Math.sin(t * 1.3);
+    var hesitation = Math.sin(t * 2.6) * 0.16;
+    targetNormX = (sweep + hesitation) * 0.74; // smooth side-to-side scan
+    // Subtle vertical scan across eye level and lips
+    targetNormY = Math.sin(t * 0.65) * 0.18 - 0.05;
+    curiousPupilDilation += (1.4 - curiousPupilDilation) * 0.04;
+
+  } else if (curiousMode === 'focal_lock') {
+    // Direct, piercing eye contact, analyzing the viewer's face
+    targetNormX = 0.0;
+    targetNormY = -0.04;
+    curiousPupilDilation += (2.2 - curiousPupilDilation) * 0.06;
+
+  } else if (curiousMode === 'inquisitive_tilt') {
+    // Puzzled / curious glance (slightly to one side and tilted up, like tilting head in thought)
+    var tiltSide = Math.sin(t * 0.5) > 0 ? 0.38 : -0.38;
+    targetNormX = tiltSide;
+    targetNormY = -0.20; // looking up inquisitively
+    curiousPupilDilation += (1.6 - curiousPupilDilation) * 0.05;
+  }
+
+  // Smooth spring interpolation toward target (gives organic physical mass and zero jitter)
+  var targetX = curCenterX + targetNormX * (width * 0.36);
+  var targetY = curCenterY + targetNormY * (height * 0.24);
+
+  var gazeLerp = (curiousMode === 'focal_lock') ? 0.075 : 0.045; // smooth silky gliding
+  userGaze.x += (targetX - userGaze.x) * gazeLerp;
+  userGaze.y += (targetY - userGaze.y) * gazeLerp;
 }
 
 function triggerBlink() {
@@ -441,25 +504,13 @@ function render(now) {
   var curCenterX = width * 0.5;
   var curCenterY = height * 0.5;
 
-  // 2. Autonomous Glances when Idle (dormant in deep slumber)
+  // 2. Silky-Smooth Curious Facial Scanning (analyzing someone in curiosity)
   var isIdle = now - lastUserInteraction > 2500;
-  if (isIdle && !isSentinelLockdown) {
-    if (now > nextIdleLookTime) {
-      pickIdleGlance();
-      nextIdleLookTime = now + 2400 + Math.random() * 3200;
-      if (Math.random() < 0.4) triggerBlink();
-    }
-    var targetIdleX = curCenterX + idleGazeDirection.x * (width * 0.35);
-    var targetIdleY = curCenterY + idleGazeDirection.y * (height * 0.25);
-    userGaze.x += (targetIdleX - userGaze.x) * 0.05;
-    userGaze.y += (targetIdleY - userGaze.y) * 0.05;
-  } else if (isSentinelLockdown) {
-    // Resting downward gaze in slumber
-    userGaze.x += (curCenterX - userGaze.x) * 0.05;
-    userGaze.y += (curCenterY + height * 0.08 - userGaze.y) * 0.05;
+  if (isIdle) {
+    updateCuriousGaze(now, curCenterX, curCenterY);
   }
 
-  // Autonomous Idle Mouth Expressions
+  // Autonomous Idle Mouth Gestures (Smiling, Angry, Frustrated, Curious & More)
   if (isIdle && !isSpeaking) {
     if (now > nextIdleMouthTime) {
       var chosenMouth = IDLE_MOUTH_EXPRESSIONS[Math.floor(Math.random() * IDLE_MOUTH_EXPRESSIONS.length)];
@@ -469,7 +520,7 @@ function render(now) {
       mouthTarget.cornerRightY = chosenMouth.cornerRightY;
       mouthTarget.teethVisible = chosenMouth.teethVisible;
       mouthTarget.smile = chosenMouth.smile;
-      nextIdleMouthTime = now + 3500 + Math.random() * 4500;
+      nextIdleMouthTime = now + 4000 + Math.random() * 4500;
     }
   }
 
@@ -563,6 +614,23 @@ function render(now) {
 function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, now, isLeftEye) {
   ctx.save();
 
+  // Find eye bounds for volumetric lighting, lid and shadows
+  var minY = 999;
+  var maxY = -999;
+  var minX = 999;
+  var maxX = -999;
+  for (var i = 0; i < contour.length; i++) {
+    var p = contour[i];
+    if (p[0] < minX) minX = p[0];
+    if (p[0] > maxX) maxX = p[0];
+    if (p[1] < minY) minY = p[1];
+    if (p[1] > maxY) maxY = p[1];
+  }
+  var eyeWidth = maxX - minX;
+  var eyeHeight = maxY - minY;
+  var eyeCenterX = (minX + maxX) * 0.5;
+  var eyeCenterY = (minY + maxY) * 0.5;
+
   // 1. Build Sclera Path
   ctx.beginPath();
   ctx.moveTo(contour[0][0], contour[0][1]);
@@ -575,27 +643,39 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   var slumberPulse = isSentinelLockdown ? (Math.sin(now * 0.0012) * 0.03) : 0;
   var slumberAlpha = Math.max(0.09, (1.0 - slumberProgress * 0.88) + slumberPulse);
 
+  // Volumetric Spherical Sclera (rich 3D crystalline depth instead of flat white)
   if (emotionalLevel > 0.01) {
     var r = Math.round(255 - emotionalLevel * 20);
     var g = Math.round(255 - emotionalLevel * 10);
     var b = 255;
     ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + slumberAlpha + ')';
   } else {
-    ctx.fillStyle = 'rgba(255, 255, 255, ' + slumberAlpha + ')';
+    var scleraGrad = ctx.createRadialGradient(
+      eyeCenterX + gazeDx * 4, eyeCenterY - 3, eyeWidth * 0.12,
+      eyeCenterX, eyeCenterY, eyeWidth * 0.65
+    );
+    scleraGrad.addColorStop(0, 'rgba(255, 255, 255, ' + slumberAlpha + ')');
+    scleraGrad.addColorStop(0.72, 'rgba(248, 250, 255, ' + slumberAlpha + ')');
+    scleraGrad.addColorStop(1, 'rgba(222, 230, 242, ' + slumberAlpha + ')');
+    ctx.fillStyle = scleraGrad;
   }
   ctx.fill();
+
+  // Crisp anti-aliased contour rim stroke for razor-sharp definition against AMOLED black
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
 
   // Clip inside eye sclera
   ctx.clip();
 
-  // 2. Dynamic Pupil Position
+  // 2. Dynamic Pupil Position & Analytical Curiosity Dilation
   var maxTravelX = isSentinelLockdown ? 5 : 14;
   var maxTravelY = isSentinelLockdown ? 3 : 10;
   var curGazeDx = isSentinelLockdown ? (gazeDx * 0.25) : gazeDx;
   var curGazeDy = isSentinelLockdown ? 0.35 : gazeDy; // resting gently downward in slumber
 
-  // Right eye is smaller/narrower vertically (height 46px vs 57px on left eye),
-  // so adapt upward travel proportionally so the pupil stays inside the socket:
+  // Right eye vertical proportion adaptation
   var effectiveTravelYUp = isLeftEye ? maxTravelY : (maxTravelY * 0.50);
   var effectiveTravelYDown = maxTravelY;
   var travelY = curGazeDy < 0 ? (curGazeDy * effectiveTravelYUp) : (curGazeDy * effectiveTravelYDown);
@@ -603,37 +683,52 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   var pupilX = restPupil[0] + Math.max(-maxTravelX, Math.min(maxTravelX, curGazeDx * maxTravelX));
   var pupilY = restPupil[1] + travelY;
 
-  // Solid Black Pupil
+  // Curious pupil dilation: expands slightly when analyzing in acute curiosity
+  var curPupilRadius = pupilRadius + (curiousPupilDilation || 0);
+
+  // 3. Volumetric Obsidian Iris & Deep Void Pupil
+  // A. Outer Limbal Ring (deep obsidian-charcoal border with glass depth)
+  var irisGrad = ctx.createRadialGradient(
+    pupilX, pupilY, curPupilRadius * 0.25,
+    pupilX, pupilY, curPupilRadius
+  );
+  irisGrad.addColorStop(0, '#000000');
+  irisGrad.addColorStop(0.68, '#08080c');
+  irisGrad.addColorStop(0.90, '#14151c');
+  irisGrad.addColorStop(1, '#050508');
   ctx.beginPath();
-  ctx.arc(pupilX, pupilY, pupilRadius, 0, Math.PI * 2);
+  ctx.arc(pupilX, pupilY, curPupilRadius, 0, Math.PI * 2);
+  ctx.fillStyle = irisGrad;
+  ctx.fill();
+
+  // B. Inner Obsidian Pupil Core
+  ctx.beginPath();
+  ctx.arc(pupilX, pupilY, curPupilRadius * 0.62, 0, Math.PI * 2);
   ctx.fillStyle = '#000000';
   ctx.fill();
 
-  // Find eye bounds for shadow and lid
-  var minY = 999;
-  var maxY = -999;
-  var minX = 999;
-  var maxX = -999;
-  for (var i = 0; i < contour.length; i++) {
-    var p = contour[i];
-    if (p[0] < minX) minX = p[0];
-    if (p[0] > maxX) maxX = p[0];
-    if (p[1] < minY) minY = p[1];
-    if (p[1] > maxY) maxY = p[1];
-  }
+  // C. Lower Corneal Luminous Crescent (Living Anime Ocular Sheen)
+  var cornealGrad = ctx.createLinearGradient(pupilX, pupilY, pupilX, pupilY + curPupilRadius);
+  cornealGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+  cornealGrad.addColorStop(0.45, 'rgba(210, 228, 255, 0.06)');
+  cornealGrad.addColorStop(1, 'rgba(235, 246, 255, 0.22)');
+  ctx.beginPath();
+  ctx.ellipse(pupilX, pupilY + curPupilRadius * 0.38, curPupilRadius * 0.72, curPupilRadius * 0.36, 0, 0, Math.PI);
+  ctx.fillStyle = cornealGrad;
+  ctx.fill();
 
-  // 3. Eyelid Drop Shadow (scaled to eye height so it does not swamp the smaller right eye)
-  var shadowDepth = (maxY - minY) * (isLeftEye ? 0.30 : 0.22);
+  // 4. Eyelid Drop Shadow (scaled to eye height so it does not swamp the smaller right eye)
+  var shadowDepth = eyeHeight * (isLeftEye ? 0.32 : 0.22);
   var shadowGrad = ctx.createLinearGradient(0, minY, 0, minY + shadowDepth);
-  shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
-  shadowGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.30)');
+  shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.88)');
+  shadowGrad.addColorStop(0.55, 'rgba(0, 0, 0, 0.35)');
   shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = shadowGrad;
-  ctx.fillRect(minX - 5, minY - 5, (maxX - minX) + 10, shadowDepth + 5);
+  ctx.fillRect(minX - 5, minY - 5, eyeWidth + 10, shadowDepth + 5);
 
-  // 4. Primary Specular Catchlight (drawn on top of shadow so the inner white dot is ALWAYS gleaming and never hidden)
-  var catchX = pupilX + pupilRadius * 0.35;
-  var catchOffsetY = (curGazeDy < 0) ? (pupilRadius * 0.12) : (pupilRadius * 0.25);
+  // 5. Primary Specular Catchlight (gleaming on top of shadow so the inner white dot is ALWAYS gleaming)
+  var catchX = pupilX + curPupilRadius * 0.35;
+  var catchOffsetY = (curGazeDy < 0) ? (curPupilRadius * 0.12) : (curPupilRadius * 0.25);
   var catchY = pupilY - catchOffsetY;
 
   // Local upper lid boundary guard: ensure catchlight is safely below the upper contour edge
@@ -650,15 +745,33 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   }
 
   var catchAlpha = Math.max(0.15, slumberAlpha * (isSentinelLockdown ? 0.32 : 1.0));
+
+  // Soft radiant bloom around specular catchlight
+  var bloomGrad = ctx.createRadialGradient(catchX, catchY, 0.5, catchX, catchY, 4.8);
+  bloomGrad.addColorStop(0, 'rgba(255, 255, 255, ' + (catchAlpha * 0.95) + ')');
+  bloomGrad.addColorStop(0.55, 'rgba(255, 255, 255, ' + (catchAlpha * 0.55) + ')');
+  bloomGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
   ctx.beginPath();
-  ctx.arc(catchX, catchY, 2.8, 0, Math.PI * 2);
+  ctx.arc(catchX, catchY, 4.8, 0, Math.PI * 2);
+  ctx.fillStyle = bloomGrad;
+  ctx.fill();
+
+  // Solid bright core catchlight
+  ctx.beginPath();
+  ctx.arc(catchX, catchY, 2.7, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(255, 255, 255, ' + catchAlpha + ')';
   ctx.fill();
 
   // Secondary soft specular sheen (gives depth and life to the pupil)
   ctx.beginPath();
   ctx.arc(catchX - 3.2, catchY + 2.8, 1.4, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 255, 255, ' + (catchAlpha * 0.65) + ')';
+  ctx.fillStyle = 'rgba(255, 255, 255, ' + (catchAlpha * 0.70) + ')';
+  ctx.fill();
+
+  // Tertiary curious analytical micro-glint
+  ctx.beginPath();
+  ctx.arc(catchX + 2.5, catchY + 3.8, 0.9, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, ' + (catchAlpha * 0.50) + ')';
   ctx.fill();
 
   // =========================================================================
@@ -748,21 +861,116 @@ function drawMouth(now, gazeDx, gazeDy) {
   
   var openness = mouthState.openness;
   var smile = mouthState.smile;
+  var teethVis = mouthState.teethVisible;
   
   // Upper lip apex (with stylized Cupid's bow contour, lifts slightly when vocalizing)
   var midUpperX = cx + (rx - lx) * 0.04;
   var midUpperY = (ly + ry) * 0.5 - smile * 14 - openness * 10;
   
   // Lower lip apex (deeper drop so opening is well-defined and clearly visible)
-  var lowerDrop = openness * 48 + Math.abs(smile) * 8;
+  var lowerDrop = openness * 48 + (smile > 0 ? smile * 8 : Math.abs(smile) * 4);
   var midLowerX = cx;
   var midLowerY = (ly + ry) * 0.5 + lowerDrop;
   
   ctx.save();
+
+  // ========================================================================
+  // 1. CLENCHED ANGRY SNARL / FRUSTRATED GRIMACE (FIERCE BATTLE GRIMACE)
+  // ========================================================================
+  var isAngryOrFrustratedClench = (teethVis > 0.40 && (smile < -0.06 || (openness >= 0.03 && openness <= 0.22 && smile < 0.10)));
+  
+  if (isAngryOrFrustratedClench) {
+    var clenchH = Math.max(12, openness * 45 + 10);
+    var grimaceUpperY = (ly + ry) * 0.5 - clenchH * 0.42;
+    var grimaceLowerY = (ly + ry) * 0.5 + clenchH * 0.58;
+
+    ctx.beginPath();
+    ctx.moveTo(lx, ly);
+    ctx.quadraticCurveTo((lx + midUpperX) * 0.5, grimaceUpperY - 1, midUpperX, grimaceUpperY);
+    ctx.quadraticCurveTo((midUpperX + rx) * 0.5, grimaceUpperY - 1, rx, ry);
+    ctx.quadraticCurveTo((rx + midLowerX) * 0.5, grimaceLowerY, midLowerX, grimaceLowerY);
+    ctx.quadraticCurveTo((midLowerX + lx) * 0.5, grimaceLowerY, lx, ly);
+    ctx.closePath();
+
+    // Dark oral shadow behind clenched teeth
+    ctx.fillStyle = '#140205';
+    ctx.fill();
+
+    ctx.save();
+    ctx.clip();
+
+    // Solid Clenched White Teeth Band
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(lx - 2, grimaceUpperY - 2, w + 4, clenchH + 4);
+
+    // Fine dark seam where upper and lower teeth clamp together
+    var seamY = (grimaceUpperY + grimaceLowerY) * 0.5;
+    ctx.strokeStyle = '#1a0408';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(lx, seamY);
+    ctx.lineTo(rx, seamY);
+    ctx.stroke();
+
+    // Prominent Upper & Lower Canine Fangs
+    var fangLeftX = lx + (midUpperX - lx) * 0.30;
+    var fangRightX = midUpperX + (rx - midUpperX) * 0.70;
+
+    ctx.fillStyle = '#ffffff';
+    // Left upper sharp fang
+    ctx.beginPath();
+    ctx.moveTo(fangLeftX - 3.2, seamY - 1);
+    ctx.lineTo(fangLeftX + 3.2, seamY - 1);
+    ctx.lineTo(fangLeftX, seamY + 4.2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Right upper sharp fang
+    ctx.beginPath();
+    ctx.moveTo(fangRightX - 3.2, seamY - 1);
+    ctx.lineTo(fangRightX + 3.2, seamY - 1);
+    ctx.lineTo(fangRightX, seamY + 4.2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Vertical Incisor Separation Notches
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.lineWidth = 1.0;
+    var stepW = w * 0.15;
+    for (var toothX = cx - stepW * 2; toothX <= cx + stepW * 2; toothX += stepW) {
+      ctx.beginPath();
+      ctx.moveTo(toothX, grimaceUpperY + 1);
+      ctx.lineTo(toothX, grimaceLowerY - 1);
+      ctx.stroke();
+    }
+
+    ctx.restore(); // end clip
+
+    // Crisp bold white anime outline
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3.0;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Fierce downturned tension corner ticks
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.0;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(lx, ly);
+    ctx.lineTo(lx - 5, ly + 4);
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx + 5, ry + 4);
+    ctx.stroke();
+
+    ctx.restore();
+    return;
+  }
   
   if (openness > 0.06) {
     // ========================================================================
-    // 1. OPEN ANIMATED MOUTH (TALKING PHONEMES / SERRATED VILLAIN GRIN)
+    // 2. OPEN ANIMATED MOUTH (TALKING PHONEMES / SERRATED VILLAIN GRIN)
     // ========================================================================
     ctx.beginPath();
     // Upper lip curve
@@ -850,7 +1058,7 @@ function drawMouth(now, gazeDx, gazeDy) {
     
   } else {
     // ========================================================================
-    // 2. CLOSED ANIMATED MOUTH (ANIME SMIRK / SHARP CANINE FANG PEEK)
+    // 3. CLOSED ANIMATED MOUTH (SMILING, POUTING, SMIRKING, CURIOUS QUIRK)
     // ========================================================================
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2.6;
@@ -864,7 +1072,7 @@ function drawMouth(now, gazeDx, gazeDy) {
     ctx.quadraticCurveTo((midUpperX + rx) * 0.5, ry + (midUpperY - ry) * 0.68, rx, ry);
     ctx.stroke();
     
-    // Iconic Anime Villain Fang Peek on Smirk
+    // Iconic Anime Villain Fang Peek on Smirk or Smile
     var isRightSmirk = mouthState.cornerRightY < -3 || smile > 0.12;
     var isLeftSmirk = mouthState.cornerLeftY < -3;
     
@@ -900,21 +1108,21 @@ function drawMouth(now, gazeDx, gazeDy) {
   }
   
   // ==========================================================================
-  // 3. SIGNATURE ANIME CORNER CREASE ACCENT TICKS
+  // 4. SIGNATURE ANIME CORNER CREASE ACCENT TICKS
   // ==========================================================================
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2.0;
   ctx.lineCap = 'round';
   
   // Left corner tick
-  var leftCreaseAngle = -0.48 + (mouthState.cornerLeftY * 0.05);
+  var leftCreaseAngle = (smile < -0.06 ? 0.48 : -0.48) + (mouthState.cornerLeftY * 0.05);
   ctx.beginPath();
   ctx.moveTo(lx, ly);
   ctx.lineTo(lx - 4.5 * Math.cos(leftCreaseAngle), ly + 4.5 * Math.sin(leftCreaseAngle));
   ctx.stroke();
   
   // Right corner tick
-  var rightCreaseAngle = 0.48 + (mouthState.cornerRightY * 0.05);
+  var rightCreaseAngle = (smile < -0.06 ? -0.48 : 0.48) + (mouthState.cornerRightY * 0.05);
   ctx.beginPath();
   ctx.moveTo(rx, ry);
   ctx.lineTo(rx + 4.5 * Math.cos(rightCreaseAngle), ry - 4.5 * Math.sin(rightCreaseAngle));
@@ -1234,6 +1442,28 @@ async function streamConversation(userPrompt) {
   window.currentUserPrompt = cleanPrompt;
   conversationTurnId++;
   var thisTurnId = conversationTurnId;
+
+  // Dynamic Emotional Gesture & Curious Analyzing Reaction:
+  if (/\b(happy|glad|great|awesome|love|smile|laugh|haha|lol|cool|wonderful|good job|thank|thanks|sweet|beautiful|cute)\b/i.test(cleanPrompt)) {
+    window.ShadowMouth.setExpression('smiling_warm');
+    curiousMode = 'focal_lock';
+    curiousModeTimer = Date.now() + 4500;
+  } else if (/\b(angry|mad|furious|hate|threat|kill|destroy|attack|fight|shut up|screw you|idiot)\b/i.test(cleanPrompt)) {
+    window.ShadowMouth.setExpression('angry_snarl');
+    curiousMode = 'focal_lock';
+    curiousModeTimer = Date.now() + 4500;
+  } else if (/\b(frustrat|annoy|bug|broken|not working|fail|glitch|ugh|dammit|slow|stupid|error|wrong|mess)\b/i.test(cleanPrompt)) {
+    window.ShadowMouth.setExpression('frustrated_grimace');
+    curiousMode = 'scanning';
+    curiousModeTimer = Date.now() + 5000;
+  } else if (/\b(who|what|where|when|why|how|analyze|check|scan|inspect|curious|tell me|explain)\b/i.test(cleanPrompt)) {
+    window.ShadowMouth.setExpression('curious_analyzing');
+    curiousMode = 'scanning';
+    curiousModeTimer = Date.now() + 6500;
+  } else {
+    curiousMode = 'scanning';
+    curiousModeTimer = Date.now() + 4000;
+  }
 
   // Abort previous fetch/stream if still active
   if (currentStreamAbortController) {
@@ -1807,9 +2037,21 @@ window.ShadowMouth = {
   // Real-time Streaming Conversation
   streamConversation: streamConversation,
   
-  // Set emotional expression
+  // Set emotional expression (Smiling, Angry, Frustrated, Curious, Smug, Surprised, etc.)
   setExpression: function(name) {
-    var exp = IDLE_MOUTH_EXPRESSIONS.find(function(e) { return e.name === name; });
+    if (!name) return;
+    var n = name.toLowerCase().trim();
+    if (n === 'smile' || n === 'smiling' || n === 'happy') n = 'smiling_warm';
+    else if (n === 'grin' || n === 'wide_smile') n = 'smiling_wide';
+    else if (n === 'angry' || n === 'mad' || n === 'snarl') n = 'angry_snarl';
+    else if (n === 'growl' || n === 'rage') n = 'angry_growl';
+    else if (n === 'frustrated' || n === 'grimace' || n === 'annoyed') n = 'frustrated_grimace';
+    else if (n === 'pout' || n === 'disgruntled') n = 'frustrated_pout';
+    else if (n === 'curious' || n === 'analyzing' || n === 'inquisitive') n = 'curious_analyzing';
+    else if (n === 'thoughtful' || n === 'thinking') n = 'thoughtful_pucker';
+    else if (n === 'smug' || n === 'smirk') n = 'smiling_devious';
+
+    var exp = IDLE_MOUTH_EXPRESSIONS.find(function(e) { return e.name === n; });
     if (exp) {
       mouthTarget.openness = exp.openness;
       mouthTarget.widthRatio = exp.widthRatio;
@@ -1927,9 +2169,9 @@ window.ShadowMouth = {
     isAcousticallySilenced = false;
     maintainActiveConversation();
 
-    // Snap eyes forward attentively
-    idleGazeDirection.x = 0;
-    idleGazeDirection.y = 0;
+    // Snap eyes forward attentively in curiosity
+    curiousMode = 'focal_lock';
+    curiousModeTimer = Date.now() + 3500;
     triggerBlink();
 
     if (EMOTIONAL_TRIGGERS_REGEX && EMOTIONAL_TRIGGERS_REGEX.test(speechText)) {
@@ -2049,9 +2291,9 @@ function onScreenTouch() {
   if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive) {
     stopSpeaking();
   } else {
-    // Snap eyes to center
-    gazeDx = 0;
-    gazeDy = 0;
+    // Snap eyes forward in sharp curiosity
+    curiousMode = 'focal_lock';
+    curiousModeTimer = performance.now() + 3500;
     triggerBlink();
     if (!window.ShadowNative) {
       recognitionDesired = true;
