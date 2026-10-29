@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Shadow Eyes</string>
+    <string name="device_admin_label">Shadow Sentinel Admin</string>
+    <string name="device_admin_description">Hardware and security sentinel administrator for Shadow, managed by librarianist.</string>
 </resources>
-

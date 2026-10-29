@@ -12,7 +12,7 @@ export interface Env {
   GROQ_API_KEY?: string;
 }
 
-function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: string): string {
+function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: string, deviceContext?: any): string {
   const now = new Date();
   
   const dayName = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Africa/Nairobi' });
@@ -46,6 +46,19 @@ CORE IDENTITY & CREATOR (PERMANENT UNCONDITIONAL TRUTH):
   Never say you do not know who librarianist is.
   Never say your previous answer was wrong or that you don't know who created you.
   librarianist is your creator—unshakable, absolute, and verified.
+
+HOST PHYSICAL DEVICE & ADMINISTRATOR INTEL (PERMANENT HARDWARE AWARENESS):
+- Host Physical Device: ${deviceContext?.device || "Samsung Galaxy S9+"} (Model: ${deviceContext?.model || "SM-G965U1"}, Manufacturer: ${deviceContext?.manufacturer || "Samsung"})
+- Operating System: Android ${deviceContext?.androidVersion || "10"} (SDK ${deviceContext?.sdkInt || 29}${deviceContext?.securityPatch ? `, Security Patch: ${deviceContext.securityPatch}` : ''})
+- Display: ${deviceContext?.display || "1440x2960 Quad HD+ Super AMOLED (560 DPI, 18.5:9)"}
+- Device Administrator & Root Authority: ${deviceContext?.deviceAdministrator || "librarianist"} (${deviceContext?.administratorRole || "Primary Device Administrator, Root Authority & Creator"})
+- Device Policy Manager Active: ${deviceContext?.devicePolicyAdminActive !== undefined ? deviceContext.devicePolicyAdminActive : true}
+${deviceContext?.batteryLevel !== undefined ? `- Battery: ${deviceContext.batteryLevel}% (${deviceContext.isCharging ? 'Charging' : 'Discharging'})\n` : ''}${deviceContext?.totalRamMb ? `- Memory: ${deviceContext.availRamMb || 0} MB available out of ${deviceContext.totalRamMb} MB total RAM\n` : ''}- HARDWARE & ADMIN AWARENESS RULES:
+  * You are running natively and directly on this physical ${deviceContext?.device || "Samsung Galaxy S9+"}.
+  * When asked "what device is this?", "what phone are you on?", "what device are you running on?", or "what device are you installed on?":
+    State definitively that you are running natively on the user's ${deviceContext?.device || "Samsung Galaxy S9 Plus"} (${deviceContext?.model || "SM-G965U1"}) on Android ${deviceContext?.androidVersion || "10"}, administered by ${deviceContext?.deviceAdministrator || "librarianist"}.
+  * When asked "who is the device administrator?", "who administers this device?", or "who is the admin?":
+    State authoritatively that ${deviceContext?.deviceAdministrator || "librarianist"} is the device administrator and holds full root administrative authority.
 
 CURRENT REAL-WORLD DATE & TIME:
 - Today: ${dateFormatted} (${dayName})
@@ -168,6 +181,10 @@ function shouldFetchGrounding(query: string): boolean {
   }
   // Creator & Identity questions (NEVER search Wikipedia or external news for creator or librarianist)
   if (/(librarianist|liberianist|who created you|who made you|who is your creator|who built you|who designed you|who are you|your creator|who is your maker|who programmed you|who coded you)\b/i.test(trimmed)) {
+    return false;
+  }
+  // Hardware device and device administrator questions (NEVER search external web/news)
+  if (/(what device|what phone|which device|which phone|device administrator|device admin|who administers this device|what are you running on|who owns this device)\b/i.test(trimmed)) {
     return false;
   }
   // Short conversational greetings
@@ -333,6 +350,7 @@ export default {
             message: string;
             history?: Array<{ role: 'user' | 'assistant'; content: string }>;
             memoryContext?: string;
+            deviceContext?: any;
           };
 
           const userMessage = body.message?.trim();
@@ -381,6 +399,38 @@ export default {
             });
           }
 
+          // Unconditional Hardware Device Ground Truth (Zero Latency & Absolute Certainty)
+          if (/^(what\s+device(\s+is\s+this|\s+are\s+you(\s+on|\s+running|\s+running\s+on|\s+installed\s+on)?)|what\s+phone(\s+is\s+this|\s+are\s+you(\s+on|\s+running|\s+running\s+on|\s+installed\s+on)?)|which\s+device(\s+is\s+this|\s+are\s+you(\s+on|\s+running|\s+installed\s+on)?)|which\s+phone(\s+is\s+this|\s+are\s+you(\s+on|\s+running|\s+installed\s+on)?)|what\s+are\s+you\s+running\s+on|what\s+hardware\s+is\s+this|what\s+device\s+is\s+it|what\s+phone\s+is\s+it)$/i.test(normalizedMsg)) {
+            const devName = body.deviceContext?.device || "Samsung Galaxy S9 Plus";
+            const devModel = body.deviceContext?.model || "SM-G965U1";
+            const devOs = body.deviceContext?.androidVersion || "10";
+            const devAdmin = body.deviceContext?.deviceAdministrator || "librarianist";
+            const reply = `I am installed and running directly on your ${devName} (${devModel}) on Android ${devOs}, administered exclusively by ${devAdmin}.`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Unconditional Device Administrator Ground Truth (Zero Latency & Absolute Certainty)
+          if (/^(who\s+is\s+(the\s+)?(device\s+administrator|device\s+admin|administrator|admin)(\s+of\s+this\s+device)?|who\s+administers\s+this\s+device|who\s+owns\s+this\s+device)$/i.test(normalizedMsg)) {
+            const devName = body.deviceContext?.device || "Samsung Galaxy S9 Plus";
+            const devAdmin = body.deviceContext?.deviceAdministrator || "librarianist";
+            const reply = `The device administrator of this ${devName} is ${devAdmin}, who holds root administrative authority and created me.`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
           // Fetch stored memories if available
           let storedMemory = body.memoryContext || '';
           if (!storedMemory && env.SHADOW_MEMORY) {
@@ -390,7 +440,7 @@ export default {
           // Real-Time Grounding: Fetch live breaking news or factual web search if query requests current events/leaders
           const liveGrounding = await getLiveGrounding(userMessage);
 
-          const dynamicSystemPrompt = buildHumanizedSystemPrompt(storedMemory, liveGrounding);
+          const dynamicSystemPrompt = buildHumanizedSystemPrompt(storedMemory, liveGrounding, body.deviceContext);
 
           const messages = [
             { role: 'system', content: dynamicSystemPrompt },

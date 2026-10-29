@@ -885,6 +885,79 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
     }
 
+    public String getDeviceDiagnosticsJson() {
+        try {
+            org.json.JSONObject json = new org.json.JSONObject();
+            json.put("device", "Samsung Galaxy S9+");
+            json.put("model", Build.MODEL);
+            json.put("manufacturer", Build.MANUFACTURER);
+            json.put("brand", Build.BRAND);
+            json.put("product", Build.PRODUCT);
+            json.put("deviceCodename", Build.DEVICE);
+            json.put("board", Build.BOARD);
+            json.put("hardware", Build.HARDWARE);
+            json.put("androidVersion", Build.VERSION.RELEASE);
+            json.put("sdkInt", Build.VERSION.SDK_INT);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                json.put("securityPatch", Build.VERSION.SECURITY_PATCH);
+            }
+            json.put("display", "1440x2960 Quad HD+ Super AMOLED (560 DPI, 18.5:9)");
+            json.put("displayDensityDpi", getResources().getDisplayMetrics().densityDpi);
+
+            // Device Administrator & Owner intelligence
+            json.put("deviceAdministrator", "librarianist");
+            json.put("administratorRole", "Primary Device Administrator, Root Authority & Creator");
+
+            android.app.admin.DevicePolicyManager dpm = (android.app.admin.DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+            android.content.ComponentName adminComponent = new android.content.ComponentName(this, ShadowDeviceAdminReceiver.class);
+            boolean isAdminActive = dpm != null && dpm.isAdminActive(adminComponent);
+            json.put("devicePolicyAdminActive", isAdminActive);
+
+            boolean isDeviceOwner = false;
+            if (dpm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+                isDeviceOwner = dpm.isDeviceOwnerApp(getPackageName());
+            }
+            json.put("isDeviceOwner", isDeviceOwner);
+
+            // Battery Diagnostics
+            Intent batteryIntent = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (batteryIntent != null) {
+                int level = batteryIntent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+                int scale = batteryIntent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
+                int status = batteryIntent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
+                boolean isCharging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                                     status == android.os.BatteryManager.BATTERY_STATUS_FULL;
+                int pct = (level >= 0 && scale > 0) ? (int) ((level / (float) scale) * 100) : -1;
+                json.put("batteryLevel", pct);
+                json.put("isCharging", isCharging);
+            }
+
+            // RAM Diagnostics
+            android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                android.app.ActivityManager.MemoryInfo memInfo = new android.app.ActivityManager.MemoryInfo();
+                am.getMemoryInfo(memInfo);
+                json.put("totalMemMb", memInfo.totalMem / (1024 * 1024));
+                json.put("availMemMb", memInfo.availMem / (1024 * 1024));
+            }
+
+            return json.toString();
+        } catch (Exception e) {
+            return "{\"device\":\"Samsung Galaxy S9+\",\"model\":\"SM-G965U1\",\"manufacturer\":\"Samsung\",\"androidVersion\":\"10\",\"deviceAdministrator\":\"librarianist\"}";
+        }
+    }
+
+    public void requestDeviceAdminActivation() {
+        android.content.ComponentName adminComponent = new android.content.ComponentName(this, ShadowDeviceAdminReceiver.class);
+        android.app.admin.DevicePolicyManager dpm = (android.app.admin.DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        if (dpm != null && !dpm.isAdminActive(adminComponent)) {
+            Intent intent = new Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+            intent.putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
+            intent.putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Authorize Shadow Sentinel Administrator privileges under librarianist.");
+            startActivity(intent);
+        }
+    }
+
     public void triggerCameraSequence() {
         if (sentinelCamera != null) {
             sentinelCamera.executeMenaceSequence();

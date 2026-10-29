@@ -64,6 +64,21 @@ public class ShadowBridge {
     }
 
     @JavascriptInterface
+    public String getDeviceDiagnosticsJson() {
+        if (activity != null) {
+            return activity.getDeviceDiagnosticsJson();
+        }
+        return "{}";
+    }
+
+    @JavascriptInterface
+    public void requestDeviceAdminActivation() {
+        if (activity != null) {
+            activity.requestDeviceAdminActivation();
+        }
+    }
+
+    @JavascriptInterface
     public String getSystemStatus() {
         return "ONLINE - AMOLED 0-NIT SENTINEL ACTIVE";
     }

@@ -10,8 +10,13 @@ package com.shadow.eyes;
 public final class R {
   public static final class string {
     public static final int app_name=0x7f010000;
+    public static final int device_admin_description=0x7f010001;
+    public static final int device_admin_label=0x7f010002;
   }
   public static final class style {
     public static final int AppTheme=0x7f020000;
+  }
+  public static final class xml {
+    public static final int device_admin_policies=0x7f030000;
   }
 }

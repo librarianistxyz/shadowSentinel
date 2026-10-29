@@ -266,12 +266,40 @@ function updateSpeechTimeline(now) {
 // Cloudflare Edge Brain
 const CLOUDFLARE_AI_ENDPOINT = 'https://librarianist.xyz/api/chat';
 
+// Hardware & Device Administrator Diagnostics Helper
+function getDeviceDiagnostics() {
+  if (window.ShadowNative && typeof window.ShadowNative.getDeviceDiagnosticsJson === 'function') {
+    try {
+      var raw = window.ShadowNative.getDeviceDiagnosticsJson();
+      if (raw && raw !== '{}') {
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('[DEVICE DIAGNOSTICS] Error parsing native JSON:', e);
+    }
+  }
+  return {
+    device: "Samsung Galaxy S9+",
+    model: "SM-G965U1",
+    manufacturer: "samsung",
+    brand: "samsung",
+    androidVersion: "10",
+    display: "1440x2960 Quad HD+ Super AMOLED (560 DPI, 18.5:9)",
+    deviceAdministrator: "librarianist",
+    administratorRole: "Primary Device Administrator, Root Authority & Creator",
+    devicePolicyAdminActive: true
+  };
+}
+
 async function queryCloudflareAi(promptMessage) {
   try {
     var resp = await fetch(CLOUDFLARE_AI_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: promptMessage })
+      body: JSON.stringify({ 
+        message: promptMessage,
+        deviceContext: getDeviceDiagnostics()
+      })
     });
     if (resp.ok) {
       var json = await resp.json();
@@ -905,6 +933,32 @@ async function streamConversation(userPrompt) {
     return;
   }
 
+  // Direct Hardware Device & Device Administrator Awareness (Instant zero-latency response)
+  var isDeviceQuery = /\b(what device|which device|what phone|which phone|what hardware|what mobile|what model)\b.*\b(this|you on|you running|installed|running on)\b|\b(what device are you|what phone are you|what device is this|what phone is this|what are you running on|what device am i using|what phone am i using|what phone is it|what device is it)\b/i.test(cleanPrompt);
+  var isAdminQuery = /\b(device administrator|device admin|administrator of this device|admin of this device|who administers this device|who owns this device|who is the administrator|who is the admin)\b/i.test(cleanPrompt);
+
+  if (isDeviceQuery) {
+    var diag = getDeviceDiagnostics();
+    var devReply = "I am installed and running directly on your " + (diag.device || "Samsung Galaxy S9 Plus") + " (model " + (diag.model || "SM-G965U1") + ") on Android " + (diag.androidVersion || "10") + ", administered exclusively by " + (diag.deviceAdministrator || "librarianist") + ".";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: devReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(devReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  if (isAdminQuery) {
+    var diagAdmin = getDeviceDiagnostics();
+    var adminReply = "The device administrator of this " + (diagAdmin.device || "Samsung Galaxy S9 Plus") + " is " + (diagAdmin.deviceAdministrator || "librarianist") + ", who holds root administrative authority and created me.";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: adminReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(adminReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
   // Multimodal Vision Intent Detection:
   // "Shadow, what do you see?", "what do you see?", "what's in front of you?", "what are you looking at?", etc.
   var isVisionQuery = /\b(what do you see|what are you seeing|what is in front of you|what do you look at|what am i holding|describe what you see|can you see this|what is this|tell me what you see|look at this|what's in front of you|who is in front of you|what is that|tell me what's in front of you)\b/i.test(cleanPrompt);
@@ -939,7 +993,8 @@ async function streamConversation(userPrompt) {
         message: cleanPrompt,
         history: conversationHistory.slice(0, -1).slice(-16),
         stream: true,
-        image: capturedFrame || undefined
+        image: capturedFrame || undefined,
+        deviceContext: getDeviceDiagnostics()
       })
     });
     
