@@ -7,3 +7,4 @@
     android:canRetrieveWindowContent="false"
     android:description="@string/bixby_accessibility_description"
     android:notificationTimeout="100" />
+
