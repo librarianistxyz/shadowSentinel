@@ -336,6 +336,10 @@ public class WakeWordEngine {
         @Override
         public void onBeginningOfSpeech() {
             Log.d(TAG, "User speech detected...");
+            WakeWordEngine engine = engineRef.get();
+            if (engine != null && engine.listener != null) {
+                engine.listener.onListeningStateChanged(true);
+            }
         }
 
         @Override

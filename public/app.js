@@ -420,6 +420,29 @@ var isSentinelLockdown = false;
 var slumberProgress = 0.0; // 0.0 (alert awake) to 1.0 (deep faint slumber)
 var isPanicMode = false; // Instant Hardware Panic Switch: 0-nit stealth blackout
 
+// ==============================================================================
+// VISUAL COGNITIVE STATE INDICATORS (Zero Clutter, Eyes-Only AMOLED Communication)
+// ==============================================================================
+var isPttActive = false;
+var isListeningActive = false; // true when PTT active or SpeechRecognizer actively listening
+var listeningFocusProgress = 0.0; // 0.0 to 1.0 (pupil contracts, catchlight shifts, eyelids part +5%)
+
+var isThinkingActive = false; // true when querying Cloudflare Edge / awaiting stream
+var thinkingSquintProgress = 0.0; // 0.0 to 1.0 (eyelids squint into calculating slits, pupils drift upward)
+
+var alertGlowStartTime = 0;
+var alertGlowDuration = 2000; // 2 seconds fade
+var alertGlowProgress = 0.0; // 1.0 down to 0.0
+
+function triggerAlertGlow() {
+  alertGlowStartTime = performance.now();
+  console.log('[ALERT]: Cognitive Alert State engaged. Crimson outline glow active.');
+}
+
+window.onWakeWordListeningState = function(listening) {
+  isListeningActive = !!listening;
+};
+
 function markUserActivity() {
   lastActivityTimestamp = performance.now();
   if (isSentinelLockdown) {
@@ -477,6 +500,20 @@ function render(now) {
   // Smooth Emotional Tear Level Interpolation
   var emoSpeed = 0.04;
   emotionalLevel += (emotionalTarget - emotionalLevel) * emoSpeed;
+
+  // Cognitive State Smooth Interpolations (Zero-clutter eyes-only indicators)
+  var targetListening = (isPttActive || isListeningActive) ? 1.0 : 0.0;
+  listeningFocusProgress += (targetListening - listeningFocusProgress) * 0.14;
+
+  var targetThinking = (isAwaitingResponse || isThinkingActive) ? 1.0 : 0.0;
+  thinkingSquintProgress += (targetThinking - thinkingSquintProgress) * 0.12;
+
+  if (alertGlowStartTime > 0 && now - alertGlowStartTime < alertGlowDuration) {
+    alertGlowProgress = 1.0 - (now - alertGlowStartTime) / alertGlowDuration;
+  } else {
+    alertGlowProgress = 0.0;
+    alertGlowStartTime = 0;
+  }
 
   // Adjust mouth for emotional sadness / compassionate empathy
   if (emotionalLevel > 0.15 && !isSpeaking) {
@@ -575,8 +612,9 @@ function render(now) {
   ctx.translate(curCenterX, curCenterY);
   ctx.scale(eyeScale, eyeScale);
 
-  var gazeDx = (smoothGaze.x - curCenterX) / (width * 0.5);
-  var gazeDy = (smoothGaze.y - curCenterY) / (height * 0.5);
+  // Thinking / Calculating State: Pupils drift subtly upward (looking into thought)
+  var gazeDx = (smoothGaze.x - curCenterX) / (width * 0.5) + (0.12 * thinkingSquintProgress);
+  var gazeDy = (smoothGaze.y - curCenterY) / (height * 0.5) - (0.34 * thinkingSquintProgress);
 
   // Left Eye
   drawSingleEye(
@@ -683,8 +721,11 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   var pupilX = restPupil[0] + Math.max(-maxTravelX, Math.min(maxTravelX, curGazeDx * maxTravelX));
   var pupilY = restPupil[1] + travelY;
 
-  // Curious pupil dilation: expands slightly when analyzing in acute curiosity
-  var curPupilRadius = pupilRadius + (curiousPupilDilation || 0);
+  // Cognitive Pupil Radius:
+  // - Contracts slightly (by 1.8px) when listening (focused attention)
+  // - Dilates in curiosity when analyzing
+  var cognitivePupilMod = (curiousPupilDilation || 0) - (1.8 * listeningFocusProgress);
+  var curPupilRadius = Math.max(12, pupilRadius + cognitivePupilMod);
 
   // 3. Volumetric Obsidian Iris & Deep Void Pupil
   // A. Outer Limbal Ring (deep obsidian-charcoal border with glass depth)
@@ -727,9 +768,12 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   ctx.fillRect(minX - 5, minY - 5, eyeWidth + 10, shadowDepth + 5);
 
   // 5. Primary Specular Catchlight (gleaming on top of shadow so the inner white dot is ALWAYS gleaming)
-  var catchX = pupilX + curPupilRadius * 0.35;
+  // Shifts subtly forward/center when listening intently in PTT/speech
+  var catchShiftX = 1.2 * listeningFocusProgress;
+  var catchShiftY = 0.8 * listeningFocusProgress;
+  var catchX = pupilX + curPupilRadius * 0.35 - catchShiftX;
   var catchOffsetY = (curGazeDy < 0) ? (curPupilRadius * 0.12) : (curPupilRadius * 0.25);
-  var catchY = pupilY - catchOffsetY;
+  var catchY = pupilY - catchOffsetY + catchShiftY;
 
   // Local upper lid boundary guard: ensure catchlight is safely below the upper contour edge
   var localTopY = 999;
@@ -798,15 +842,30 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
     ctx.fill();
   }
 
-  // 5. Heavy Hooded Slumber Eyelid & Natural Blink
-  var effectiveLid = Math.min(1.0, blink + slumberProgress * 0.74);
+  // 5. Cognitive Eyelid Shaping:
+  // - Focused Listening: parts eyelids by +5% (wider focused attention)
+  // - Thinking / Edge Querying: squints into calculating slits
+  // - Slumber: hooded +0.74
+  // - Natural blink: +blinkProgress
+  var listeningLidOffset = -0.05 * listeningFocusProgress;
+  var thinkingSquintUpper = 0.28 * thinkingSquintProgress;
+  var effectiveLid = Math.max(0.0, Math.min(1.0, blink + slumberProgress * 0.74 + thinkingSquintUpper + listeningLidOffset));
+
   if (effectiveLid > 0.01) {
     var currentLidY = minY + (maxY - minY + 10) * effectiveLid;
     ctx.fillStyle = '#000000';
-    ctx.fillRect(minX - 10, minY - 10, (maxX - minX) + 20, currentLidY - minY + 10);
+    ctx.fillRect(minX - 10, minY - 10, eyeWidth + 20, currentLidY - minY + 10);
   }
 
-  // 5. Glistening Tear Meniscus along the Lower Eyelid Rim
+  // Lower calculating squint lid (thinking state narrow calculating slit)
+  if (thinkingSquintProgress > 0.02) {
+    var lowerSquintH = eyeHeight * 0.14 * thinkingSquintProgress;
+    var lowerSquintY = maxY - lowerSquintH;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(minX - 10, lowerSquintY, eyeWidth + 20, lowerSquintH + 10);
+  }
+
+  // 6. Glistening Tear Meniscus along the Lower Eyelid Rim
   if (emotionalLevel > 0.01) {
     var lowerLidY = maxY - 1.2;
     var tearGrad = ctx.createLinearGradient(minX, lowerLidY, maxX, lowerLidY);
@@ -837,6 +896,26 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   }
 
   ctx.restore();
+
+  // =========================================================================
+  // ALERT / INTRUDER COGNITIVE STATE: Faint 2px Crimson Outline Glow (#ff1a2a)
+  // Sclera contours gain a very faint 2px crimson glow that fades over 2s
+  // =========================================================================
+  if (alertGlowProgress > 0.01) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(contour[0][0], contour[0][1]);
+    for (var i = 1; i < contour.length; i++) {
+      ctx.lineTo(contour[i][0], contour[i][1]);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(255, 26, 42, ' + (0.85 * alertGlowProgress) + ')';
+    ctx.lineWidth = 2.0;
+    ctx.shadowColor = 'rgba(255, 26, 42, ' + (0.95 * alertGlowProgress) + ')';
+    ctx.shadowBlur = 5.0 * alertGlowProgress;
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 // ==============================================================================
@@ -1405,6 +1484,7 @@ async function streamConversation(userPrompt) {
   markUserActivity();
   pauseMicrophone();
   isAwaitingResponse = true;
+  isThinkingActive = true; // Cognitive State: Eyelids squint into calculating slits; pupils drift subtly upward
 
   // Emotional Teary Eye Sensitivity Detection
   if (EMOTIONAL_TRIGGERS_REGEX.test(userPrompt)) {
@@ -1664,6 +1744,7 @@ async function streamConversation(userPrompt) {
           }
           
           if (token && thisTurnId === conversationTurnId && !isAcousticallySilenced) {
+            isThinkingActive = false; // Transition smoothly from calculating squint to verbal delivery
             fullReply += token;
             activeClause += token;
             
@@ -1732,6 +1813,7 @@ async function streamConversation(userPrompt) {
       resumeMicrophone(50);
     }
   } finally {
+    isThinkingActive = false;
     if (activeStreamReader) {
       try { activeStreamReader.cancel(); } catch(e) {}
       activeStreamReader = null;
@@ -2072,8 +2154,9 @@ window.ShadowMouth = {
     if (smile !== undefined) mouthTarget.smile = smile;
   },
   
-  // Face spotted reaction (Visual anime smirk only - strictly silent!)
+  // Face spotted reaction (Visual anime smirk + Cognitive Alert Glow)
   onFaceDetected: function(faceCount) {
+    triggerAlertGlow();
     mouthTarget.cornerRightY = -8;
     mouthTarget.cornerLeftY = -3;
     mouthTarget.smile = 0.24;
@@ -2203,6 +2286,7 @@ window.ShadowMouth = {
 
   // Physical Hardware Bixby Push-to-Talk (PTT)
   onPttStateChanged: function(pressed) {
+    isPttActive = !!pressed;
     if (isPanicMode) {
       // In stealth blackout, single press is suppressed to prevent accidental cover blow
       return;
@@ -2254,6 +2338,11 @@ window.ShadowMouth = {
   // Trigger emotional teary eyes
   triggerTears: function(intensity, durationMs) {
     triggerEmotionalTears(intensity, durationMs);
+  },
+
+  // Trigger Cognitive Alert crimson outline glow (fades over 2s)
+  triggerAlert: function() {
+    triggerAlertGlow();
   },
 
   getStatus: function() {

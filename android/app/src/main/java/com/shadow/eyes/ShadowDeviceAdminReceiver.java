@@ -19,5 +19,15 @@ public class ShadowDeviceAdminReceiver extends DeviceAdminReceiver {
         super.onDisabled(context, intent);
         Log.w(TAG, "Shadow Device Administrator revoked");
     }
+
+    @Override
+    public void onPasswordFailed(Context context, Intent intent) {
+        super.onPasswordFailed(context, intent);
+        Log.w(TAG, "Intruder Alert: Failed lockscreen passcode attempt detected!");
+        MainActivity activity = MainActivity.getInstance();
+        if (activity != null) {
+            activity.triggerIntruderAlert();
+        }
+    }
 }
 

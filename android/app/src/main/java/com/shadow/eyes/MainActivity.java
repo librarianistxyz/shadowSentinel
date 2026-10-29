@@ -201,6 +201,18 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
     }
 
+    static class TriggerIntruderAlertTask implements Runnable {
+        private final MainActivity activity;
+        public TriggerIntruderAlertTask(MainActivity activity) {
+            this.activity = activity;
+        }
+        @Override
+        public void run() {
+            if (activity == null || activity.webView == null) return;
+            activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.triggerAlert && window.ShadowMouth.triggerAlert();", null);
+        }
+    }
+
     static class ShadowWakeWordListener implements WakeWordEngine.WakeWordListener {
         private final MainActivity activity;
         public ShadowWakeWordListener(MainActivity activity) {
@@ -438,6 +450,10 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
 
     public void triggerPanicSwitch() {
         mainHandler.post(new TriggerPanicTask(this));
+    }
+
+    public void triggerIntruderAlert() {
+        mainHandler.post(new TriggerIntruderAlertTask(this));
     }
 
     private void triggerHapticClick(int durationMs) {
