@@ -641,6 +641,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         private static String smoothenText(String raw) {
             if (raw == null) return "";
             return raw.trim()
+                .replaceAll("(?i)^(?:hello[!,.]?\\s*)?(?:it'?s\\s+)?lovely\\s+to\\s+(?:help\\s+you(?:\\s+with\\s+that)?|hear\\s+from\\s+you|meet\\s+you)[!,.]?\\s*", "")
                 .replaceAll("\\bAI\\b", "A.I.")
                 .replaceAll("\\bAPI\\b", "A.P.I.")
                 .replaceAll("\\be\\.g\\.", "for example")

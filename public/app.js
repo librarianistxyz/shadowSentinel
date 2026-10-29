@@ -1024,7 +1024,10 @@ function sanitizeSpeechText(text) {
     }
   }
 
-  return text.replace(/\[\[[A-Z_]+(?::[^\]]*)?\]\]/gi, '').trim();
+  var clean = text.replace(/\[\[[A-Z_]+(?::[^\]]*)?\]\]/gi, '').trim();
+  // Strip repetitive canned greeting filler ("hello it's lovely to help you with that", "lovely to hear from you", etc.)
+  clean = clean.replace(/^(?:hello[!,.]?\s*)?(?:it's\s+|its\s+)?lovely\s+to\s+(?:help\s+you(?:\s+with\s+that)?|hear\s+from\s+you|meet\s+you)[!,.]?\s*/i, '');
+  return clean.trim();
 }
 
 // Queue clauses and speak them with zero delay (clause-by-clause low-latency streaming)
