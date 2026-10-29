@@ -587,7 +587,6 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     protected void onPause() {
         super.onPause();
         if (wakeWordEngine != null) {
-            wakeWordEngine.enableHardwareNoiseCancellation(false);
             wakeWordEngine.pause();
         }
     }
@@ -1434,7 +1433,6 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             instanceRef = null;
         }
         if (wakeWordEngine != null) {
-            wakeWordEngine.enableHardwareNoiseCancellation(false);
             wakeWordEngine.stop();
         }
         if (textToSpeech != null) {

@@ -49,7 +49,6 @@ public class WakeWordEngine {
     private final Context context;
     private final Handler mainHandler;
     private final WakeWordListener listener;
-    private final AudioManager audioManager;
 
     private SpeechRecognizer speechRecognizer;
     private Intent recognizerIntent;
@@ -93,7 +92,6 @@ public class WakeWordEngine {
         this.context = context.getApplicationContext();
         this.mainHandler = new Handler(Looper.getMainLooper());
         this.listener = listener;
-        this.audioManager = (AudioManager) this.context.getSystemService(Context.AUDIO_SERVICE);
 
         initRecognizerIntent();
     }
@@ -105,35 +103,6 @@ public class WakeWordEngine {
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.getPackageName());
-
-        // Low-latency continuous streaming and offline dictation for instant mid-speech barge-in
-        recognizerIntent.putExtra("android.speech.extra.DICTATION_MODE", true);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 100L);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 400L);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 350L);
-    }
-
-    /**
-     * Toggles hardware-level Acoustic Echo Cancellation (AEC) and dual-mic noise suppression
-     * on the Qualcomm Snapdragon 845 hardware DSP.
-     * MODE_IN_COMMUNICATION informs the audio HAL to subtract the speaker reference from the mic.
-     */
-    public void enableHardwareNoiseCancellation(boolean enable) {
-        if (audioManager == null) return;
-        try {
-            if (enable) {
-                audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-                audioManager.setSpeakerphoneOn(true);
-                Log.d(TAG, "Hardware Noise Cancellation & Qualcomm Fluence AEC ENABLED (MODE_IN_COMMUNICATION)");
-            } else {
-                audioManager.setSpeakerphoneOn(false);
-                audioManager.setMode(AudioManager.MODE_NORMAL);
-                Log.d(TAG, "Hardware audio mode restored to MODE_NORMAL");
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "Failed to toggle hardware audio mode: " + e.getMessage());
-        }
     }
 
     public synchronized void start() {
@@ -178,11 +147,10 @@ public class WakeWordEngine {
     public synchronized void setInterruptionOnlyMode(boolean active) {
         this.isInterruptionOnlyMode = active;
         Log.d(TAG, "Interruption-only mode set to: " + active);
-        enableHardwareNoiseCancellation(active);
         if (active) {
             if (isRunning && isPaused) {
                 isPaused = false;
-                mainHandler.postDelayed(new StartListeningTask(this), 100);
+                mainHandler.postDelayed(new StartListeningTask(this), 150);
             }
         }
     }
@@ -259,7 +227,6 @@ public class WakeWordEngine {
     }
 
     void stopListeningInternal() {
-        enableHardwareNoiseCancellation(false);
         isListening = false;
         if (listener != null) {
             listener.onListeningStateChanged(false);
@@ -338,7 +305,6 @@ public class WakeWordEngine {
         }
         lastWakeTriggerTime = now;
         isInterruptionOnlyMode = false;
-        enableHardwareNoiseCancellation(false);
         Log.i(TAG, "ACOUSTIC BARGE-IN INTERRUPTION TRIGGERED! User commanded 'listen' / 'quiet'");
         if (listener != null) {
             listener.onInterruptionRequested();

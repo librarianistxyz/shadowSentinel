@@ -1802,16 +1802,14 @@ window.ShadowMouth = {
   onWakeWordDetected: function(phrase, trailingCommand) {
     console.log('[WAKE-WORD / GREETING DETECTED]:', phrase, 'Trailing command:', trailingCommand);
 
-    // If user silenced Shadow with "listen" or within 1800ms of interruption, keep mouth shut and ignore residue:
-    if (isAcousticallySilenced || (Date.now() - lastInterruptionTime < 1800)) {
-      console.log('[WAKE-WORD BLOCKED]: Strictly silenced via "listen" - ignoring wake word and avoiding old conversation continuation');
-      idleGazeDirection.x = 0;
-      idleGazeDirection.y = 0;
-      mouthTarget.openness = 0.0;
-      mouthTarget.smile = 0.04;
-      mouthTarget.teethVisible = 0.0;
+    // Reject acoustic residue within 600ms of an interruption:
+    if (Date.now() - lastInterruptionTime < 600) {
+      console.log('[WAKE-WORD BLOCKED]: Acoustic residue within 600ms of interruption discarded');
       return;
     }
+
+    // Wake word resets acoustic silence lock - user is actively speaking to Shadow again!
+    isAcousticallySilenced = false;
 
     maintainActiveConversation();
 
@@ -1820,8 +1818,6 @@ window.ShadowMouth = {
     idleGazeDirection.y = 0;
 
     // Visual alert gaze: eyes attentive, mouth shut, waiting for quiz/command
-    idleGazeDirection.x = 0;
-    idleGazeDirection.y = 0;
     mouthTarget.openness = 0.0;
     mouthTarget.smile = 0.04;
     mouthTarget.teethVisible = 0.0;
@@ -1844,11 +1840,14 @@ window.ShadowMouth = {
     console.log('[ON-DEVICE FOLLOW-UP SPEECH]:', speechText);
     if (!speechText || !speechText.trim()) return;
 
-    // Reject any acoustic residue captured within 1800ms of an interruption:
-    if (Date.now() - lastInterruptionTime < 1800) {
-      console.log('[SPEECH BLOCKED]: Acoustic residue within 1.8s of interruption discarded');
+    // Reject any acoustic residue captured within 600ms of an interruption:
+    if (Date.now() - lastInterruptionTime < 600) {
+      console.log('[SPEECH BLOCKED]: Acoustic residue within 600ms of interruption discarded');
       return;
     }
+
+    // A real follow-up command or question clears acoustic silence!
+    isAcousticallySilenced = false;
 
     maintainActiveConversation();
     if (EMOTIONAL_TRIGGERS_REGEX.test(speechText)) {
