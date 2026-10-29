@@ -139,6 +139,42 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         mainHandler.post(new HandleFollowUpTask(this, speechText));
     }
 
+    static class HandlePttTask implements Runnable {
+        private final MainActivity activity;
+        private final boolean pressed;
+        public HandlePttTask(MainActivity activity, boolean pressed) {
+            this.activity = activity;
+            this.pressed = pressed;
+        }
+        @Override
+        public void run() {
+            if (activity == null || activity.webView == null) return;
+            if (pressed) {
+                if (activity.isNativeSpeaking || (activity.textToSpeech != null && activity.textToSpeech.isSpeaking())) {
+                    activity.stopSpeaking();
+                }
+                if (activity.wakeWordEngine != null) {
+                    activity.wakeWordEngine.setFollowUpMode(true);
+                    activity.wakeWordEngine.resume();
+                }
+            }
+            activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.onPttStateChanged(" + pressed + ");", null);
+        }
+    }
+
+    static class TriggerPanicTask implements Runnable {
+        private final MainActivity activity;
+        public TriggerPanicTask(MainActivity activity) {
+            this.activity = activity;
+        }
+        @Override
+        public void run() {
+            if (activity == null || activity.webView == null) return;
+            activity.stopSpeaking();
+            activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.onPanicTriggered();", null);
+        }
+    }
+
     static class ShadowWakeWordListener implements WakeWordEngine.WakeWordListener {
         private final MainActivity activity;
         public ShadowWakeWordListener(MainActivity activity) {
@@ -236,6 +272,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        instanceRef = new java.lang.ref.WeakReference<>(this);
+        vibrator = (android.os.Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         applyImmersiveOledMode();
@@ -270,6 +308,117 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         } else {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 requestPermissions(REQUIRED_PERMISSIONS, PERMISSION_REQ_CODE);
+            }
+        }
+    }
+
+    private static java.lang.ref.WeakReference<MainActivity> instanceRef;
+    public static MainActivity getInstance() {
+        return instanceRef != null ? instanceRef.get() : null;
+    }
+
+    private long bixbyLastPressTime = 0;
+    private long bixbyDownTime = 0;
+    private android.os.Vibrator vibrator;
+
+    public void handlePttPress(final boolean pressed) {
+        mainHandler.post(new HandlePttTask(this, pressed));
+    }
+
+    public void triggerPanicSwitch() {
+        mainHandler.post(new TriggerPanicTask(this));
+    }
+
+    private void triggerHapticClick(int durationMs) {
+        try {
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(durationMs, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    vibrator.vibrate(durationMs);
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void triggerHapticPanic() {
+        try {
+            if (vibrator != null && vibrator.hasVibrator()) {
+                long[] pattern = {0, 80, 50, 120};
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1));
+                } else {
+                    vibrator.vibrate(pattern, -1);
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void handleBixbyKeyEvent(KeyEvent event) {
+        int action = event.getAction();
+        long now = System.currentTimeMillis();
+
+        if (action == KeyEvent.ACTION_DOWN) {
+            if (event.getRepeatCount() == 0) {
+                bixbyDownTime = now;
+                boolean isDoublePress = (now - bixbyLastPressTime < 450);
+                bixbyLastPressTime = now;
+
+                if (isDoublePress) {
+                    android.util.Log.w("ShadowEyes", "[PANIC SWITCH] Double-press detected on Bixby button!");
+                    triggerHapticPanic();
+                    triggerPanicSwitch();
+                } else {
+                    android.util.Log.i("ShadowEyes", "[BIXBY PTT] Key down: Hardware Push-To-Talk active");
+                    triggerHapticClick(35);
+                    handlePttPress(true);
+                }
+            }
+        } else if (action == KeyEvent.ACTION_UP) {
+            long holdDuration = now - bixbyDownTime;
+            android.util.Log.i("ShadowEyes", "[BIXBY PTT] Key up: Hardware Push-To-Talk released (hold " + holdDuration + "ms)");
+            triggerHapticClick(15);
+            handlePttPress(false);
+        }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_VOICE_ASSIST || keyCode == 238 || keyCode == KeyEvent.KEYCODE_ASSIST) {
+            handleBixbyKeyEvent(event);
+            return true; // Consume event completely so Samsung Bixby never launches
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOICE_ASSIST || keyCode == 238 || keyCode == KeyEvent.KEYCODE_ASSIST) {
+            handleBixbyKeyEvent(event);
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOICE_ASSIST || keyCode == 238 || keyCode == KeyEvent.KEYCODE_ASSIST) {
+            handleBixbyKeyEvent(event);
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent != null) {
+            if (intent.getBooleanExtra("ACTION_PANIC", false)) {
+                triggerPanicSwitch();
+            } else if (intent.getBooleanExtra("ACTION_PTT", false)) {
+                handlePttPress(true);
             }
         }
     }
@@ -1089,6 +1238,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (instanceRef != null && instanceRef.get() == this) {
+            instanceRef = null;
+        }
         if (wakeWordEngine != null) {
             wakeWordEngine.stop();
         }

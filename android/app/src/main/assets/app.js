@@ -355,6 +355,7 @@ const SENTINEL_LOCKDOWN_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes of complete s
 var lastActivityTimestamp = performance.now();
 var isSentinelLockdown = false;
 var slumberProgress = 0.0; // 0.0 (alert awake) to 1.0 (deep faint slumber)
+var isPanicMode = false; // Instant Hardware Panic Switch: 0-nit stealth blackout
 
 function markUserActivity() {
   lastActivityTimestamp = performance.now();
@@ -428,6 +429,13 @@ function render(now) {
   // 1. Pure 0-nit black clear
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, width, height);
+
+  // Hardware Panic Stealth Blackout
+  if (isPanicMode) {
+    ctx.restore();
+    requestAnimationFrame(render);
+    return;
+  }
 
   // EYES ARE FIXED EXACT DEAD CENTER
   var curCenterX = width * 0.5;
@@ -1669,6 +1677,47 @@ window.ShadowMouth = {
     streamConversation(speechText.trim());
   },
 
+  // Physical Hardware Bixby Push-to-Talk (PTT)
+  onPttStateChanged: function(pressed) {
+    if (isPanicMode) {
+      // In stealth blackout, single press is suppressed to prevent accidental cover blow
+      return;
+    }
+    console.log('[HARDWARE BIXBY PTT]:', pressed ? 'ACTIVE (Down)' : 'RELEASED (Up)');
+    if (pressed) {
+      var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
+      if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive) {
+        stopSpeaking();
+      }
+      maintainActiveConversation();
+      idleGazeDirection.x = 0;
+      idleGazeDirection.y = 0;
+      mouthTarget.openness = 0.08;
+      mouthTarget.smile = 0.15;
+      mouthTarget.teethVisible = 0.25;
+      triggerBlink();
+    } else {
+      maintainActiveConversation();
+    }
+  },
+
+  // Instant Hardware Panic Switch (Double-click Bixby)
+  onPanicTriggered: function() {
+    stopSpeaking();
+    isPanicMode = !isPanicMode;
+    console.log('[HARDWARE PANIC SWITCH]: Mode =', isPanicMode ? 'STEALTH BLACKOUT ENGAGED' : 'STEALTH DISENGAGED');
+    if (isPanicMode) {
+      pauseMicrophone();
+      if (window.ShadowNative && typeof window.ShadowNative.setFollowUpMode === 'function') {
+        window.ShadowNative.setFollowUpMode(false);
+      }
+    } else {
+      maintainActiveConversation();
+      triggerBlink();
+      enqueueSpeechClause("Stealth disengaged. Standing guard.");
+    }
+  },
+
   // Control Sentinel Lockdown slumber
   setLockdown: function(active) {
     if (active) {
@@ -1706,6 +1755,13 @@ function initContinuousListening() {
 // User Touch Interruption / Silent Mic Initialization (Zero unprompted talking)
 function onScreenTouch() {
   requestScreenLock();
+  if (isPanicMode) {
+    isPanicMode = false;
+    maintainActiveConversation();
+    triggerBlink();
+    enqueueSpeechClause("Stealth disengaged. Standing guard.");
+    return;
+  }
   maintainActiveConversation();
   var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
   if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive) {
