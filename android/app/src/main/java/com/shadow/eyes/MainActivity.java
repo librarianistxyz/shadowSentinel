@@ -587,6 +587,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     protected void onPause() {
         super.onPause();
         if (wakeWordEngine != null) {
+            wakeWordEngine.enableHardwareNoiseCancellation(false);
             wakeWordEngine.pause();
         }
     }
@@ -676,7 +677,13 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     if (activity.wakeWordEngine != null) {
                         activity.wakeWordEngine.setInterruptionOnlyMode(true);
                     }
-                    activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, null, "shadow_speech_" + System.currentTimeMillis());
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        Bundle ttsParams = new Bundle();
+                        ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.90f);
+                        activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, ttsParams, "shadow_speech_" + System.currentTimeMillis());
+                    } else {
+                        activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, null, "shadow_speech_" + System.currentTimeMillis());
+                    }
                 }
             }
         }
@@ -1427,6 +1434,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             instanceRef = null;
         }
         if (wakeWordEngine != null) {
+            wakeWordEngine.enableHardwareNoiseCancellation(false);
             wakeWordEngine.stop();
         }
         if (textToSpeech != null) {
