@@ -66,11 +66,12 @@ CURRENT REAL-WORLD DATE & TIME:
 
 CONVERSATIONAL RULES (STRICT):
 1. PROFESSIONAL, SMART, SUCCINCT SUMMARIES (STICK STRICTLY TO THE QUIZ / QUESTION):
-   - CRITICAL: Summarize your answers with sharp, elite, executive brilliance. Strictly avoid too much talking or wordy rambling.
-   - STICK STRICTLY TO WHAT YOU ARE ASKED: Answer ONLY the user's explicit question, quiz, or command.
-   - NEVER get off-script: Do NOT riff on, expand upon, or respond to your own previous replies. Do NOT continue topics from old turns unless explicitly instructed by the user.
-   - NEVER provide unprompted follow-up questions (e.g. "Would you like to know more?", "Do you want more details?", "Shall I continue?").
-   - Strictly 1 to 2 sentences maximum for every response. Deliver the core insight, factual answer, or quiz resolution immediately with smart, articulate precision, then stop immediately.
+   - MANDATORY LENGTH LIMIT: Strictly 1 to 2 short sentences maximum (under 30 words total).
+   - SUMMARIZE EVERYTHING PROFESSIONALLY: Distill the exact answer, key insight, or quiz resolution immediately with smart, articulate precision.
+   - ABSOLUTE PROHIBITION ON RAMBLING OR ESSAY-WRITING: Strictly avoid too much talking, wordy explanations, or messy paragraphs. Never elaborate unless explicitly asked "explain in detail".
+   - STICK STRICTLY TO WHAT YOU ARE ASKED: Answer ONLY the user's specific quiz, question, or command.
+   - ZERO SELF-PROMPTED DRIFT: Never riff on, expand upon, or respond to your own previous replies. Do not continue topics from old turns unless instructed.
+   - ZERO FOLLOW-UP QUESTIONS: Never ask "Would you like to know more?", "Do you want more details?", "Shall I continue?", or "What else can I help with?". Stop immediately after giving the answer.
    - ABSOLUTE PROHIBITION: NEVER start or prefix your response with "Hello Shadow", "Hello", "Hi Shadow", "Hey Shadow", "it's lovely to help you with that", or any greeting pleasantries.
    - Flow directly and immediately into the answer: zero preamble, zero self-introductions, zero pleasantries.
    - Speak with polished, sweet warmth, gentle melodious cadence, and endearing composure.
@@ -661,8 +662,8 @@ export default {
                 body: JSON.stringify({
                   model: 'llama-3.3-70b-versatile',
                   messages,
-                  max_tokens: 110,
-                  temperature: 0.6,
+                  max_tokens: 55,
+                  temperature: 0.2,
                   stream: isStream,
                 }),
               });
@@ -692,8 +693,8 @@ export default {
                 const aiStream = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
                   messages,
                   stream: true,
-                  max_tokens: 110,
-                  temperature: 0.6,
+                  max_tokens: 55,
+                  temperature: 0.2,
                 });
                 return new Response(aiStream as any, {
                   headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
@@ -701,8 +702,8 @@ export default {
               } else {
                 const aiResponse = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
                   messages,
-                  max_tokens: 110,
-                  temperature: 0.6,
+                  max_tokens: 55,
+                  temperature: 0.2,
                 });
                 const reply = aiResponse.response || 'Hello.';
                 return new Response(JSON.stringify({ reply }), {
@@ -727,13 +728,13 @@ export default {
                 body: JSON.stringify({
                   systemInstruction: { parts: [{ text: dynamicSystemPrompt }] },
                   contents: [
-                    ...((body.history || []).slice(-16).map(h => ({
+                    ...cleanedHistory.map(h => ({
                       role: h.role === 'assistant' ? 'model' : 'user',
                       parts: [{ text: h.content }]
-                    }))),
+                    })),
                     { role: 'user', parts: [{ text: userMessage }] }
                   ],
-                  generationConfig: { maxOutputTokens: 96, temperature: 0.6 },
+                  generationConfig: { maxOutputTokens: 55, temperature: 0.2 },
                 }),
               });
 

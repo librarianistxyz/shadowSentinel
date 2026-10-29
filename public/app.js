@@ -1321,6 +1321,7 @@ async function streamConversation(userPrompt) {
     var buffer = '';
     var fullReply = '';
     var activeClause = '';
+    var completedSentences = 0;
     
     while (true) {
       if (thisTurnId !== conversationTurnId || isAcousticallySilenced) {
@@ -1357,7 +1358,7 @@ async function streamConversation(userPrompt) {
             fullReply += token;
             activeClause += token;
             
-            // Natural sentence boundary: period, question mark, exclamation, or natural length
+            // Natural sentence boundary: period, question mark, exclamation
             var isSentenceTerminator = /[.!?\n]/.test(token);
             var isLengthyClause = activeClause.trim().split(/\s+/).length >= 10;
             
@@ -1366,10 +1367,19 @@ async function streamConversation(userPrompt) {
                 enqueueSpeechClause(activeClause);
               }
               activeClause = '';
+              if (isSentenceTerminator) {
+                completedSentences++;
+                if (completedSentences >= 2) {
+                  // Hard limit: Professional 1-2 sentence executive summary enforced
+                  try { reader.cancel(); } catch(e) {}
+                  break;
+                }
+              }
             }
           }
         } catch(e) {}
       }
+      if (completedSentences >= 2) break;
     }
     
     activeStreamReader = null;
