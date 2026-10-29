@@ -246,8 +246,78 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         public void onInit(int status) {
             if (status == TextToSpeech.SUCCESS && activity.textToSpeech != null) {
                 activity.textToSpeech.setLanguage(Locale.US);
-                activity.textToSpeech.setPitch(0.96f);
-                activity.textToSpeech.setSpeechRate(1.18f);
+
+                // Configure USAGE_ASSISTANT audio stream for hardware-level vocal clarity
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    try {
+                        android.media.AudioAttributes audioAttributes = new android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build();
+                        activity.textToSpeech.setAudioAttributes(audioAttributes);
+                    } catch (Exception ignored) {}
+                }
+
+                // Intelligently select the highest-fidelity, smoothest sweet voice
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    try {
+                        java.util.Set<android.speech.tts.Voice> voices = activity.textToSpeech.getVoices();
+                        if (voices != null && !voices.isEmpty()) {
+                            android.speech.tts.Voice bestVoice = null;
+                            int bestScore = -1;
+
+                            for (android.speech.tts.Voice v : voices) {
+                                Locale loc = v.getLocale();
+                                if (loc == null || !loc.getLanguage().equals("en")) continue;
+
+                                int score = 0;
+                                String name = v.getName().toLowerCase(Locale.US);
+
+                                // Prefer US or GB English
+                                if (loc.getCountry().equalsIgnoreCase("US")) {
+                                    score += 150;
+                                } else if (loc.getCountry().equalsIgnoreCase("GB")) {
+                                    score += 100;
+                                }
+
+                                // Prioritize studio-grade high fidelity quality
+                                if (v.getQuality() == android.speech.tts.Voice.QUALITY_VERY_HIGH) {
+                                    score += 350;
+                                } else if (v.getQuality() == android.speech.tts.Voice.QUALITY_HIGH) {
+                                    score += 250;
+                                } else if (v.getQuality() == android.speech.tts.Voice.QUALITY_NORMAL) {
+                                    score += 50;
+                                }
+
+                                // Prioritize melodious, warm, natural female voices
+                                if (name.contains("female") || name.contains("sfg") || name.contains("tpd") || name.contains("iol") || name.contains("wavenet") || name.contains("neural")) {
+                                    score += 300;
+                                }
+
+                                // Prefer offline local voices for zero network stutter
+                                if (!v.isNetworkConnectionRequired()) {
+                                    score += 100;
+                                }
+
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    bestVoice = v;
+                                }
+                            }
+
+                            if (bestVoice != null) {
+                                android.util.Log.i("ShadowEyes", "[VOICE] Selected sweet high-fidelity voice: " + bestVoice.getName() + " (Score: " + bestScore + ")");
+                                activity.textToSpeech.setVoice(bestVoice);
+                            }
+                        }
+                    } catch (Exception e) {
+                        android.util.Log.w("ShadowEyes", "Could not enumerate voices: " + e.getMessage());
+                    }
+                }
+
+                // Smooth sweet melodious pitch and human conversational cadence
+                activity.textToSpeech.setPitch(1.04f);
+                activity.textToSpeech.setSpeechRate(0.98f);
                 activity.textToSpeech.setOnUtteranceProgressListener(new ShadowUtteranceListener(activity));
                 activity.isTtsReady = true;
             }
@@ -290,7 +360,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             android.util.Log.e("ShadowEyes", "Failed to start ShadowService", e);
         }
 
-        textToSpeech = new TextToSpeech(this, new TtsInitCallback(this));
+        textToSpeech = new TextToSpeech(this, new TtsInitCallback(this), "com.google.android.tts");
 
         webView = new WebView(this);
         setContentView(webView);
@@ -550,13 +620,32 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             this.activity = activity;
             this.text = text;
         }
+
+        private static String smoothenText(String raw) {
+            if (raw == null) return "";
+            return raw.trim()
+                .replaceAll("\\bAI\\b", "A.I.")
+                .replaceAll("\\bAPI\\b", "A.P.I.")
+                .replaceAll("\\be\\.g\\.", "for example")
+                .replaceAll("\\bi\\.e\\.", "that is")
+                .replaceAll("\\bdept\\.", "department")
+                .replaceAll("\\bapprox\\.", "approximately")
+                .replaceAll("\\bvs\\.?\\b", "versus")
+                .replaceAll("[*#_~`\\[\\](){}<>|\"^]", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+        }
+
         @Override
         public void run() {
-            if (activity.isTtsReady && activity.textToSpeech != null && text != null && !text.trim().isEmpty()) {
-                activity.activeUtterances++;
-                activity.isNativeSpeaking = true;
-                activity.notifyNativeSpeechState(true);
-                activity.textToSpeech.speak(text.trim(), TextToSpeech.QUEUE_ADD, null, "shadow_speech_" + System.currentTimeMillis());
+            if (activity.isTtsReady && activity.textToSpeech != null && text != null) {
+                String clean = smoothenText(text);
+                if (!clean.isEmpty()) {
+                    activity.activeUtterances++;
+                    activity.isNativeSpeaking = true;
+                    activity.notifyNativeSpeechState(true);
+                    activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, null, "shadow_speech_" + System.currentTimeMillis());
+                }
             }
         }
     }

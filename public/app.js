@@ -1546,8 +1546,16 @@ window.ShadowMouth = {
       try {
         window.speechSynthesis.cancel();
         var utter = new SpeechSynthesisUtterance(text);
-        utter.pitch = 0.96;
-        utter.rate = 1.18;
+        utter.pitch = 1.04;
+        utter.rate = 0.98;
+        var voices = window.speechSynthesis.getVoices();
+        for (var v = 0; v < voices.length; v++) {
+          var vname = voices[v].name.toLowerCase();
+          if (voices[v].lang.indexOf('en') === 0 && (vname.indexOf('female') !== -1 || vname.indexOf('natural') !== -1 || vname.indexOf('samantha') !== -1 || vname.indexOf('victoria') !== -1 || vname.indexOf('google us') !== -1)) {
+            utter.voice = voices[v];
+            break;
+          }
+        }
         window.speechSynthesis.speak(utter);
       } catch (e) {}
     }
