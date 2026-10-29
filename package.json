@@ -1,0 +1,20 @@
+{
+  "name": "shadow-double",
+  "version": "1.0.0",
+  "description": "The AMOLED Shadow Double: A persistent silhouette on pitch-black glass that mirrors your mind, running on Cloudflare Edge.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "ship": "./ship_to_phone.sh",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20240923.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "wrangler": "^3.78.0"
+  }
+}
+
