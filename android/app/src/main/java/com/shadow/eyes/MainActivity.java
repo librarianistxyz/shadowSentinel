@@ -9,6 +9,10 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.media.AudioAttributes;
@@ -43,6 +47,11 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     public volatile long lastTtsEndTime = 0;
     public volatile String lastSpokenSentence = "";
     public WakeWordEngine wakeWordEngine;
+    SensorManager sensorManager;
+    Sensor lightSensor;
+    ShadowLightSensorListener lightSensorListener;
+    public volatile float currentLux = 50.0f;
+    public volatile boolean isDarkRoom = false;
     final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private static final int PERMISSION_REQ_CODE = 442;
@@ -273,6 +282,50 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         public void onWakeWordRmsChanged(float rmsDb) {}
     }
 
+    static class ShadowLightSensorListener implements SensorEventListener {
+        private final java.lang.ref.WeakReference<MainActivity> activityRef;
+        public ShadowLightSensorListener(MainActivity activity) {
+            this.activityRef = new java.lang.ref.WeakReference<>(activity);
+        }
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            MainActivity activity = activityRef.get();
+            if (activity != null && event.values != null && event.values.length > 0) {
+                float lux = event.values[0];
+                activity.updateAmbientLight(lux);
+            }
+        }
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+    }
+
+    static class NotifyAmbientLightTask implements Runnable {
+        private final MainActivity activity;
+        private final float lux;
+        private final boolean isDark;
+        public NotifyAmbientLightTask(MainActivity activity, float lux, boolean isDark) {
+            this.activity = activity;
+            this.lux = lux;
+            this.isDark = isDark;
+        }
+        @Override
+        public void run() {
+            if (activity != null && activity.webView != null) {
+                activity.webView.evaluateJavascript("if (window.onAmbientLightChanged) window.onAmbientLightChanged(" + lux + ", " + isDark + ");", null);
+            }
+        }
+    }
+
+    public void updateAmbientLight(float lux) {
+        this.currentLux = lux;
+        boolean dark = (lux < 4.0f); // Ambient light threshold: dark room triggers intimate sinister whisper
+        if (dark != this.isDarkRoom) {
+            this.isDarkRoom = dark;
+            android.util.Log.i("ShadowEyes", "[AMBIENT LIGHT] Lux: " + lux + " lx -> isDarkRoom: " + isDarkRoom);
+            mainHandler.post(new NotifyAmbientLightTask(this, lux, dark));
+        }
+    }
+
     static class ShadowUtteranceListener extends android.speech.tts.UtteranceProgressListener {
         private final MainActivity activity;
         public ShadowUtteranceListener(MainActivity activity) {
@@ -376,9 +429,12 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                                     score += 50;
                                 }
 
-                                // Prioritize melodious, warm, natural female voices
-                                if (name.contains("female") || name.contains("sfg") || name.contains("tpd") || name.contains("iol") || name.contains("wavenet") || name.contains("neural")) {
-                                    score += 300;
+                                // Sinister Persona: Strongly penalize high/female voices, prioritize deep baritone male voices
+                                if (name.contains("female") || name.contains("woman") || name.contains("girl")) {
+                                    score -= 600;
+                                }
+                                if (name.contains("male") || name.contains("baritone") || name.contains("deep") || name.contains("man") || name.contains("rjs") || name.contains("iom") || name.contains("iob") || name.contains("iog") || name.contains("en-us-x-sfg") || name.contains("en-gb-x-rjs")) {
+                                    score += 450;
                                 }
 
                                 // Prefer offline local voices for zero network stutter
@@ -393,7 +449,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                             }
 
                             if (bestVoice != null) {
-                                android.util.Log.i("ShadowEyes", "[VOICE] Selected sweet high-fidelity voice: " + bestVoice.getName() + " (Score: " + bestScore + ")");
+                                android.util.Log.i("ShadowEyes", "[VOICE] Selected sinister deep baritone voice: " + bestVoice.getName() + " (Score: " + bestScore + ")");
                                 activity.textToSpeech.setVoice(bestVoice);
                             }
                         }
@@ -402,9 +458,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     }
                 }
 
-                // Smooth sweet melodious pitch and human conversational cadence
-                activity.textToSpeech.setPitch(1.04f);
-                activity.textToSpeech.setSpeechRate(0.98f);
+                // Sinister Baritone: Deep resonant pitch and deliberate, articulate cinematic cadence
+                activity.textToSpeech.setPitch(0.78f);
+                activity.textToSpeech.setSpeechRate(0.88f);
                 activity.textToSpeech.setOnUtteranceProgressListener(new ShadowUtteranceListener(activity));
                 activity.isTtsReady = true;
             }
@@ -460,6 +516,17 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
 
         textToSpeech = new TextToSpeech(this, new TtsInitCallback(this), "com.google.android.tts");
+
+        // Initialize Hardware Ambient Light Sensor (TMD4906 on Samsung Galaxy S9+)
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (sensorManager != null) {
+            lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
+            if (lightSensor != null) {
+                lightSensorListener = new ShadowLightSensorListener(this);
+                sensorManager.registerListener(lightSensorListener, lightSensor, SensorManager.SENSOR_DELAY_NORMAL);
+                android.util.Log.i("ShadowEyes", "[LIGHT SENSOR] TMD4906 Ambient Light Sensor registered successfully");
+            }
+        }
 
         webView = new WebView(this);
         setContentView(webView);
@@ -927,6 +994,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     protected void onResume() {
         super.onResume();
         applyImmersiveOledMode();
+        if (sensorManager != null && lightSensor != null && lightSensorListener != null) {
+            sensorManager.registerListener(lightSensorListener, lightSensor, SensorManager.SENSOR_DELAY_NORMAL);
+        }
         if (webView != null) {
             webView.onResume();
             webView.resumeTimers();
@@ -943,6 +1013,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     @Override
     protected void onPause() {
         super.onPause();
+        if (sensorManager != null && lightSensorListener != null) {
+            sensorManager.unregisterListener(lightSensorListener);
+        }
         if (wakeWordEngine != null) {
             wakeWordEngine.pause();
         }
@@ -1047,7 +1120,19 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         Bundle ttsParams = new Bundle();
-                        ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.90f);
+                        if (activity.isDarkRoom) {
+                            // Contextual Whisper in dark room: intimate, sinister, quiet whisper
+                            activity.textToSpeech.setPitch(0.70f);
+                            activity.textToSpeech.setSpeechRate(0.84f);
+                            ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.32f);
+                            android.util.Log.i("ShadowEyes", "[CONTEXTUAL WHISPER] Dark room (" + activity.currentLux + " lx) - intimate whisper volume/pitch active");
+                        } else {
+                            // Illuminated room: deep resonant baritone
+                            activity.textToSpeech.setPitch(0.78f);
+                            activity.textToSpeech.setSpeechRate(0.88f);
+                            ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.90f);
+                            android.util.Log.i("ShadowEyes", "[SINISTER BARITONE] Resonant baritone delivery (" + activity.currentLux + " lx)");
+                        }
                         activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, ttsParams, this.utteranceId);
                     } else {
                         activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, null, this.utteranceId);
@@ -1780,6 +1865,10 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 json.put("availMemMb", memInfo.availMem / (1024 * 1024));
             }
 
+            // Ambient Light & Contextual Dark Room Status
+            json.put("ambientLux", this.currentLux);
+            json.put("isDarkRoom", this.isDarkRoom);
+
             return json.toString();
         } catch (Exception e) {
             return "{\"device\":\"Samsung Galaxy S9+\",\"model\":\"SM-G965U1\",\"manufacturer\":\"Samsung\",\"androidVersion\":\"10\",\"deviceAdministrator\":\"librarianist\"}";
@@ -1807,6 +1896,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     protected void onDestroy() {
         super.onDestroy();
         abandonMusicDucking();
+        if (sensorManager != null && lightSensorListener != null) {
+            sensorManager.unregisterListener(lightSensorListener);
+        }
         if (instanceRef != null && instanceRef.get() == this) {
             instanceRef = null;
         }

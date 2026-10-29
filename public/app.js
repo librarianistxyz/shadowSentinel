@@ -287,8 +287,26 @@ function updateSpeechTimeline(now) {
   }
 }
 
-// Cloudflare Edge Brain
+// Cloudflare Edge Brain & Neural Voice Streaming (Cartesia Sonic / ElevenLabs Flash)
 const CLOUDFLARE_AI_ENDPOINT = 'https://librarianist.xyz/api/chat';
+const CLOUDFLARE_TTS_ENDPOINT = 'https://librarianist.xyz/api/tts';
+
+// Ambient Light & Contextual Dark Room State
+var isDarkRoom = false;
+var currentAmbientLux = 50.0;
+
+window.onAmbientLightChanged = function(lux, dark) {
+  currentAmbientLux = lux;
+  isDarkRoom = dark;
+  console.log('[AMBIENT LIGHT]: ' + lux + ' lx -> isDarkRoom: ' + dark);
+};
+
+if (window.ShadowNative && typeof window.ShadowNative.isDarkRoom === 'function') {
+  try {
+    isDarkRoom = window.ShadowNative.isDarkRoom();
+    currentAmbientLux = window.ShadowNative.getAmbientLux();
+  } catch(e) {}
+}
 
 // Hardware & Device Administrator Diagnostics Helper
 function getDeviceDiagnostics() {
@@ -296,7 +314,10 @@ function getDeviceDiagnostics() {
     try {
       var raw = window.ShadowNative.getDeviceDiagnosticsJson();
       if (raw && raw !== '{}') {
-        return JSON.parse(raw);
+        var parsed = JSON.parse(raw);
+        if (parsed.ambientLux !== undefined) currentAmbientLux = parsed.ambientLux;
+        if (parsed.isDarkRoom !== undefined) isDarkRoom = parsed.isDarkRoom;
+        return parsed;
       }
     } catch (e) {
       console.warn('[DEVICE DIAGNOSTICS] Error parsing native JSON:', e);
@@ -311,7 +332,9 @@ function getDeviceDiagnostics() {
     display: "1440x2960 Quad HD+ Super AMOLED (560 DPI, 18.5:9)",
     deviceAdministrator: "librarianist",
     administratorRole: "Primary Device Administrator, Root Authority & Creator",
-    devicePolicyAdminActive: true
+    devicePolicyAdminActive: true,
+    ambientLux: currentAmbientLux,
+    isDarkRoom: isDarkRoom
   };
 }
 
@@ -1358,6 +1381,17 @@ function stopSpeaking() {
   isAwaitingResponse = false;
   lastAiSpeechFinishedTime = Date.now();
   
+  if (activeNeuralAudio) {
+    try {
+      activeNeuralAudio.pause();
+      activeNeuralAudio.currentTime = 0;
+    } catch(e) {}
+    activeNeuralAudio = null;
+    if (window.ShadowNative && typeof window.ShadowNative.abandonMusicDucking === 'function') {
+      window.ShadowNative.abandonMusicDucking();
+    }
+  }
+
   if (currentStreamAbortController) {
     try { currentStreamAbortController.abort(); } catch(e) {}
     currentStreamAbortController = null;
@@ -2080,6 +2114,130 @@ function startMicrophone() {
   }
 }
 
+var activeNeuralAudio = null;
+
+function fallbackToNativeTts(text, utteranceId, onComplete) {
+  speechEndCallback = onComplete || null;
+  if (window.ShadowNative && typeof window.ShadowNative.speakNative === 'function') {
+    isWaitingForNativeAudioStart = true;
+    isSpeaking = true;
+    speechStartTime = 0; // Starts synchronously when UtteranceProgressListener.onStart fires
+    try {
+      if (window.ShadowNative.speakNative.length >= 2) {
+        window.ShadowNative.speakNative(text, utteranceId);
+      } else {
+        window.ShadowNative.speakNative(text);
+      }
+    } catch (e) {
+      window.ShadowNative.speakNative(text);
+    }
+  } else if ('speechSynthesis' in window) {
+    isWaitingForNativeAudioStart = false;
+    isSpeaking = true;
+    speechStartTime = performance.now();
+    try {
+      window.speechSynthesis.cancel();
+      var utter = new SpeechSynthesisUtterance(text);
+      utter.pitch = isDarkRoom ? 0.70 : 0.78; // Sinister baritone
+      utter.rate = isDarkRoom ? 0.84 : 0.88;  // Deliberate cadence
+      utter.volume = isDarkRoom ? 0.32 : 0.90; // Contextual whisper
+      var voices = window.speechSynthesis.getVoices();
+      for (var v = 0; v < voices.length; v++) {
+        var vname = voices[v].name.toLowerCase();
+        if (voices[v].lang.indexOf('en') === 0 && (vname.indexOf('male') !== -1 || vname.indexOf('george') !== -1 || vname.indexOf('david') !== -1 || vname.indexOf('james') !== -1)) {
+          utter.voice = voices[v];
+          break;
+        }
+      }
+      utter.onend = function() {
+        isSpeaking = false;
+        lastAiSpeechFinishedTime = Date.now();
+        if (typeof onComplete === 'function') onComplete();
+      };
+      window.speechSynthesis.speak(utter);
+    } catch (e) {}
+  }
+}
+
+async function playNeuralSpeechWithFallback(text, utteranceId, onComplete) {
+  var isDark = isDarkRoom;
+  if (window.ShadowNative && typeof window.ShadowNative.isDarkRoom === 'function') {
+    try { isDark = window.ShadowNative.isDarkRoom(); } catch(e) {}
+  }
+
+  // Attempt Cloudflare Edge Neural TTS (Cartesia Sonic sub-90ms / ElevenLabs Flash)
+  var controller = new AbortController();
+  var timer = setTimeout(function() {
+    try { controller.abort(); } catch(e) {}
+  }, 1900); // Fast timeout to guarantee conversational fluidity
+
+  try {
+    var resp = await fetch(CLOUDFLARE_TTS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: text,
+        whisper: isDark
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    var cType = resp.headers.get('content-type') || '';
+    if (resp.ok && (cType.includes('audio/mpeg') || cType.includes('audio/mp3') || cType.includes('audio/wav'))) {
+      var blob = await resp.blob();
+      var audioUrl = URL.createObjectURL(blob);
+      var audio = new Audio(audioUrl);
+      activeNeuralAudio = audio;
+
+      // Adjust volume for contextual whisper
+      audio.volume = isDark ? 0.32 : 0.90;
+
+      audio.onplay = function() {
+        console.log('[NEURAL TTS]: Playing sinister ' + (isDark ? 'whisper' : 'baritone') + ' (' + (resp.headers.get('x-neural-provider') || 'Neural') + ')');
+        if (window.ShadowNative && typeof window.ShadowNative.requestMusicDucking === 'function') {
+          window.ShadowNative.requestMusicDucking();
+        }
+        isSpeaking = true;
+        isWaitingForNativeAudioStart = false;
+        speechStartTime = performance.now();
+        window.onNativeSpeechState(true);
+      };
+
+      audio.onended = function() {
+        console.log('[NEURAL TTS]: Playback complete');
+        if (window.ShadowNative && typeof window.ShadowNative.abandonMusicDucking === 'function') {
+          window.ShadowNative.abandonMusicDucking();
+        }
+        URL.revokeObjectURL(audioUrl);
+        activeNeuralAudio = null;
+        isSpeaking = false;
+        window.onNativeSpeechState(false);
+        lastAiSpeechFinishedTime = Date.now();
+        if (typeof onComplete === 'function') onComplete();
+      };
+
+      audio.onerror = function(err) {
+        console.warn('[NEURAL TTS]: Playback error, falling back to native TTS', err);
+        if (window.ShadowNative && typeof window.ShadowNative.abandonMusicDucking === 'function') {
+          window.ShadowNative.abandonMusicDucking();
+        }
+        URL.revokeObjectURL(audioUrl);
+        activeNeuralAudio = null;
+        fallbackToNativeTts(text, utteranceId, onComplete);
+      };
+
+      await audio.play();
+      return;
+    }
+  } catch (e) {
+    clearTimeout(timer);
+  }
+
+  // Gracefully and immediately use sinister native baritone engine
+  fallbackToNativeTts(text, utteranceId, onComplete);
+}
+
 window.ShadowMouth = {
   // Speak text with synchronized lip movement & native speech
   speak: function(text, onComplete) {
@@ -2088,42 +2246,7 @@ window.ShadowMouth = {
     speechEndCallback = onComplete || null;
     currentUtteranceId = 'utt_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     
-    // 1. Android Native TTS (if running inside APK)
-    if (window.ShadowNative && typeof window.ShadowNative.speakNative === 'function') {
-      isWaitingForNativeAudioStart = true;
-      isSpeaking = true;
-      speechStartTime = 0; // Starts synchronously when UtteranceProgressListener.onStart fires
-      try {
-        if (window.ShadowNative.speakNative.length >= 2) {
-          window.ShadowNative.speakNative(text, currentUtteranceId);
-        } else {
-          window.ShadowNative.speakNative(text);
-        }
-      } catch (e) {
-        window.ShadowNative.speakNative(text);
-      }
-    } 
-    // 2. Web Speech API fallback
-    else if ('speechSynthesis' in window) {
-      isWaitingForNativeAudioStart = false;
-      isSpeaking = true;
-      speechStartTime = performance.now();
-      try {
-        window.speechSynthesis.cancel();
-        var utter = new SpeechSynthesisUtterance(text);
-        utter.pitch = 1.04;
-        utter.rate = 0.98;
-        var voices = window.speechSynthesis.getVoices();
-        for (var v = 0; v < voices.length; v++) {
-          var vname = voices[v].name.toLowerCase();
-          if (voices[v].lang.indexOf('en') === 0 && (vname.indexOf('female') !== -1 || vname.indexOf('natural') !== -1 || vname.indexOf('samantha') !== -1 || vname.indexOf('victoria') !== -1 || vname.indexOf('google us') !== -1)) {
-            utter.voice = voices[v];
-            break;
-          }
-        }
-        window.speechSynthesis.speak(utter);
-      } catch (e) {}
-    }
+    playNeuralSpeechWithFallback(text, currentUtteranceId, onComplete);
   },
 
   // Instant Interruption / Barge-in

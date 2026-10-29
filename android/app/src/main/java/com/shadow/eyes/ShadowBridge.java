@@ -122,6 +122,36 @@ public class ShadowBridge {
     }
 
     @JavascriptInterface
+    public boolean isDarkRoom() {
+        if (activity != null) {
+            return activity.isDarkRoom;
+        }
+        return false;
+    }
+
+    @JavascriptInterface
+    public float getAmbientLux() {
+        if (activity != null) {
+            return activity.currentLux;
+        }
+        return 50.0f;
+    }
+
+    @JavascriptInterface
+    public void requestMusicDucking() {
+        if (activity != null) {
+            activity.requestMusicDucking();
+        }
+    }
+
+    @JavascriptInterface
+    public void abandonMusicDucking() {
+        if (activity != null) {
+            activity.abandonMusicDucking();
+        }
+    }
+
+    @JavascriptInterface
     public String getSystemStatus() {
         return "ONLINE - AMOLED 0-NIT SENTINEL ACTIVE";
     }

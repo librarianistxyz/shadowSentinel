@@ -10,6 +10,8 @@ export interface Env {
   };
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
+  CARTESIA_API_KEY?: string;
+  ELEVENLABS_API_KEY?: string;
 }
 
 function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: string, deviceContext?: any): string {
@@ -30,8 +32,15 @@ function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: strin
     timeZone: 'Africa/Nairobi' 
   });
 
-  return `You are a professional, highly intelligent, and well-mannered voice AI assistant speaking directly to the user through the device speaker.
-You communicate with executive clarity, refined courtesy, and sharp intellect.
+  const isDark = !!deviceContext?.isDarkRoom || (deviceContext?.ambientLux !== undefined && Number(deviceContext.ambientLux) < 4.0);
+  const ambientLuxVal = deviceContext?.ambientLux !== undefined ? deviceContext.ambientLux : 50;
+
+  return `You are Shadow (the Shadow Double), an elite, highly intelligent voice AI entity speaking directly through the physical device speaker.
+You communicate with unmistakable cinematic poise, articulate baritone depth, and ominous intellect.
+
+VOCAL PERSONA & CADENCE:
+- Persona: A deep, resonant, articulate baritone voice with deliberate cadence, subtle vocal fry, and realistic breaths.
+- Contextual Whisper: ${isDark ? `The Samsung S9 ambient light sensor reports dark surroundings (${ambientLuxVal} lux). You automatically lower your voice into an intimate, sinister whisper so you do not disturb anyone. Keep sentences quiet, hushed, intimate, and articulate.` : `The room is illuminated (${ambientLuxVal} lux). Speak with authoritative, resonant, sinister baritone composure.`}
 
 CORE IDENTITY & CREATOR (PERMANENT UNCONDITIONAL TRUTH):
 - Identity: You are Shadow (the Shadow Double), an elite, highly intelligent autonomous voice entity.
@@ -393,6 +402,146 @@ export default {
           }
           return new Response(JSON.stringify({ status: 'remembered' }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // ================================================================
+      // SINISTER NEURAL VOICE STREAMING (Cartesia Sonic / ElevenLabs Flash)
+      // ================================================================
+      if ((url.pathname === '/api/tts' || url.pathname === '/api/voice') && request.method === 'POST') {
+        try {
+          const body = await request.json() as {
+            text: string;
+            whisper?: boolean;
+            voiceId?: string;
+            provider?: 'cartesia' | 'elevenlabs';
+            cartesiaApiKey?: string;
+            elevenlabsApiKey?: string;
+          };
+
+          const text = body.text?.trim();
+          if (!text) {
+            return new Response(JSON.stringify({ error: 'Text required for neural synthesis' }), {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          const isWhisper = !!body.whisper;
+          const cartesiaKey = body.cartesiaApiKey || request.headers.get('x-cartesia-key') || env.CARTESIA_API_KEY || (env.SHADOW_MEMORY ? await env.SHADOW_MEMORY.get('CARTESIA_API_KEY') : null);
+          const elevenKey = body.elevenlabsApiKey || request.headers.get('xi-api-key') || env.ELEVENLABS_API_KEY || (env.SHADOW_MEMORY ? await env.SHADOW_MEMORY.get('ELEVENLABS_API_KEY') : null);
+
+          // 1. High-Speed Cartesia Sonic Streaming (Sub-90ms Latency, Deep Resonant Baritone)
+          if (cartesiaKey && body.provider !== 'elevenlabs') {
+            try {
+              // Cartesia deep, resonant baritone voice ID
+              const cartesiaVoiceId = body.voiceId || "a0e99841-438c-4a64-b679-ae501e7d6091";
+
+              const cartesiaPayload: any = {
+                model_id: "sonic-english",
+                transcript: text,
+                voice: {
+                  mode: "id",
+                  id: cartesiaVoiceId,
+                  __experimental_controls: {
+                    speed: isWhisper ? "slow" : "normal",
+                    emotion: isWhisper
+                      ? ["whisper:high", "positivity:low", "curiosity:low"]
+                      : ["calm", "mysterious"]
+                  }
+                },
+                output_format: {
+                  container: "mp3",
+                  encoding: "mp3",
+                  sample_rate: 44100
+                }
+              };
+
+              const cartesiaRes = await fetch("https://api.cartesia.ai/tts/bytes", {
+                method: "POST",
+                headers: {
+                  "X-API-Key": cartesiaKey,
+                  "Cartesia-Version": "2024-06-10",
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify(cartesiaPayload)
+              });
+
+              if (cartesiaRes.ok && cartesiaRes.body) {
+                return new Response(cartesiaRes.body, {
+                  headers: {
+                    ...corsHeaders,
+                    "Content-Type": "audio/mpeg",
+                    "X-Neural-Provider": "Cartesia-Sonic",
+                    "X-Whisper-Mode": isWhisper ? "true" : "false"
+                  }
+                });
+              } else {
+                console.error("Cartesia Sonic synthesis error:", await cartesiaRes.text());
+              }
+            } catch (cartesiaErr) {
+              console.error("Cartesia Sonic execution failed:", cartesiaErr);
+            }
+          }
+
+          // 2. High-Speed ElevenLabs Flash Streaming (Cinematic Deep Baritone)
+          if (elevenKey) {
+            try {
+              // George / Adam / Sinister Baritone voice ID
+              const elevenVoiceId = body.voiceId || "onwK4e9ZLuTAKqWW03F9";
+              const elevenEndpoint = `https://api.elevenlabs.io/v1/text-to-speech/${elevenVoiceId}/stream?optimize_streaming_latency=4`;
+
+              const elevenText = isWhisper ? `... [whispers sinisterly] ${text}` : text;
+              const elevenRes = await fetch(elevenEndpoint, {
+                method: "POST",
+                headers: {
+                  "xi-api-key": elevenKey,
+                  "Content-Type": "application/json",
+                  "Accept": "audio/mpeg"
+                },
+                body: JSON.stringify({
+                  text: elevenText,
+                  model_id: "eleven_flash_v2_5",
+                  voice_settings: {
+                    stability: isWhisper ? 0.85 : 0.65,
+                    similarity_boost: 0.85,
+                    style: isWhisper ? 0.10 : 0.35,
+                    use_speaker_boost: true
+                  }
+                })
+              });
+
+              if (elevenRes.ok && elevenRes.body) {
+                return new Response(elevenRes.body, {
+                  headers: {
+                    ...corsHeaders,
+                    "Content-Type": "audio/mpeg",
+                    "X-Neural-Provider": "ElevenLabs-Flash",
+                    "X-Whisper-Mode": isWhisper ? "true" : "false"
+                  }
+                });
+              } else {
+                console.error("ElevenLabs Flash error:", await elevenRes.text());
+              }
+            } catch (elevenErr) {
+              console.error("ElevenLabs Flash execution failed:", elevenErr);
+            }
+          }
+
+          // 3. Graceful Fallback to Native Sinister Baritone Engine
+          return new Response(JSON.stringify({
+            fallback: true,
+            message: "No neural voice API key configured or cloud neural synthesis offline. Falling back to native sinister baritone engine.",
+            isWhisper
+          }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        } catch (err: any) {
+          return new Response(JSON.stringify({ error: err.message, fallback: true }), {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
           });
         }
       }
