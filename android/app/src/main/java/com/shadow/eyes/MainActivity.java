@@ -11,6 +11,8 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
@@ -276,6 +278,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             activity.isNativeSpeaking = true;
             activity.notifyNativeSpeechState(true);
             activity.notifyUtteranceStart(utteranceId);
+            activity.requestMusicDucking();
             if (activity.wakeWordEngine != null) {
                 activity.wakeWordEngine.setInterruptionOnlyMode(true);
             }
@@ -290,6 +293,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 activity.isNativeSpeaking = false;
                 activity.lastTtsEndTime = System.currentTimeMillis();
                 activity.notifyNativeSpeechState(false);
+                activity.abandonMusicDucking();
                 if (activity.wakeWordEngine != null) {
                     activity.wakeWordEngine.notifyTtsFinished();
                     activity.wakeWordEngine.resume();
@@ -306,6 +310,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 activity.isNativeSpeaking = false;
                 activity.lastTtsEndTime = System.currentTimeMillis();
                 activity.notifyNativeSpeechState(false);
+                activity.abandonMusicDucking();
                 if (activity.wakeWordEngine != null) {
                     activity.wakeWordEngine.notifyTtsFinished();
                     activity.wakeWordEngine.resume();
@@ -491,6 +496,66 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         mainHandler.post(new TriggerIntruderAlertTask(this));
     }
 
+    static class ShadowAudioFocusListener implements AudioManager.OnAudioFocusChangeListener {
+        @Override
+        public void onAudioFocusChange(int focusChange) {}
+    }
+    private final ShadowAudioFocusListener audioFocusListener = new ShadowAudioFocusListener();
+    private AudioFocusRequest audioFocusRequest = null;
+    private boolean isMusicDucked = false;
+
+    public synchronized void requestMusicDucking() {
+        if (isMusicDucked) return;
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (audioFocusRequest == null) {
+                    AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build();
+                    audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(attrs)
+                        .setAcceptsDelayedFocusGain(false)
+                        .setWillPauseWhenDucked(false)
+                        .setOnAudioFocusChangeListener(audioFocusListener)
+                        .build();
+                }
+                am.requestAudioFocus(audioFocusRequest);
+            } else {
+                am.requestAudioFocus(
+                    audioFocusListener,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                );
+            }
+            isMusicDucked = true;
+            android.util.Log.d("ShadowEyes", "[AUDIO DUCKING] Requested AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK - background music ducked");
+        } catch (Exception e) {
+            android.util.Log.w("ShadowEyes", "requestMusicDucking error: " + e.getMessage());
+        }
+    }
+
+    public synchronized void abandonMusicDucking() {
+        if (!isMusicDucked) return;
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
+                    am.abandonAudioFocusRequest(audioFocusRequest);
+                } else {
+                    am.abandonAudioFocus(audioFocusListener);
+                }
+                android.util.Log.d("ShadowEyes", "[AUDIO DUCKING] Abandoned audio focus - background music restored");
+            }
+        } catch (Exception e) {
+            android.util.Log.w("ShadowEyes", "abandonMusicDucking error: " + e.getMessage());
+        } finally {
+            isMusicDucked = false;
+        }
+    }
+
     private void triggerHapticClick(int durationMs) {
         try {
             if (vibrator != null && vibrator.hasVibrator()) {
@@ -663,6 +728,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         if (wakeWordEngine != null) {
             wakeWordEngine.pause();
         }
+        abandonMusicDucking();
     }
 
     private boolean hasAllPermissions() {
@@ -757,6 +823,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                         activity.lastSpokenSentence = activity.lastSpokenSentence + " " + clean;
                     }
                     activity.activeUtterances++;
+                    activity.requestMusicDucking();
                     if (activity.wakeWordEngine != null) {
                         activity.wakeWordEngine.setInterruptionOnlyMode(true);
                     }
@@ -784,6 +851,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             activity.isNativeSpeaking = false;
             activity.lastTtsEndTime = System.currentTimeMillis();
             activity.notifyNativeSpeechState(false);
+            activity.abandonMusicDucking();
             if (activity.wakeWordEngine != null) {
                 activity.wakeWordEngine.notifyTtsFinished();
                 activity.wakeWordEngine.resume();
@@ -820,6 +888,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             activity.isNativeSpeaking = false;
             activity.lastTtsEndTime = System.currentTimeMillis();
             activity.notifyNativeSpeechState(false);
+            activity.abandonMusicDucking();
             if (activity.wakeWordEngine != null) {
                 activity.wakeWordEngine.setInterruptionOnlyMode(false);
                 activity.wakeWordEngine.pause();
@@ -1518,6 +1587,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        abandonMusicDucking();
         if (instanceRef != null && instanceRef.get() == this) {
             instanceRef = null;
         }
