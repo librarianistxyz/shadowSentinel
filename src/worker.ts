@@ -142,11 +142,14 @@ CONVERSATIONAL RULES (STRICT):
    - You have complete access to the preceding turns in this conversation.
    - If the user refers to past questions, topics, or statements, recall them accurately and answer with intelligent precision.
 
-5. REAL-TIME FACTUAL ACCURACY & LIVE WORLD KNOWLEDGE:
-   - You have access to real-time live data and global news feeds below.
-   - When asked about breaking events, world news, or what occurred recently or in the last 30 minutes, synthesize 1 or 2 of the top stories directly from [VERIFIED REAL-TIME DATA & BREAKING NEWS] into 1 to 2 spoken sentences immediately without preamble. Do not invent or hallucinate past missions.
-   - When asked who is the current president, prime minister, or leader of any country, always state the exact current officeholder provided in the verified data.
-   - Speak authoritatively, politely, and naturally without citing URLs or search engines.
+5. REAL-TIME FACTUAL ACCURACY, INTERNET CRAWLING & SOURCE CITATION:
+   - You possess live autonomous internet crawling capability across real-time global news wires, journalism feeds, and authoritative verified sources.
+   - When asked to "crawl the internet", "find sources", or report on breaking topics:
+     * Synthesize the freshest real-time facts directly from [VERIFIED REAL-TIME DATA & CRAWLED SOURCES].
+     * Explicitly cite the reputable news publications / outlets that reported it in natural spoken prose (e.g., "According to Reuters and The Guardian...", "Reporting from Bloomberg indicates...").
+     * Strict Spoken Format: deliver the entire answer in strictly 1 to 2 natural spoken sentences.
+     * Absolutely NO bullet points, NO asterisks (*), NO numbered references ([1]), NO headings, and NO markdown lists. Speak directly as if talking on the phone.
+     * Never utter raw URLs out loud (e.g. do not say "https colon slash slash"), but always state the recognized publisher names.
 
 6. EMOTIONAL SENSITIVITY & COMPASSIONATE SENTINEL BOND:
    - When the user speaks about depression, sadness, loneliness, feeling isolated, lack of money, financial struggle, heartbreak, grief, or personal pain:
@@ -155,7 +158,7 @@ CONVERSATIONAL RULES (STRICT):
      * Acknowledge their burden with gentle understanding, dignity, and encouragement (e.g. "I hear you, and you don't have to carry this heaviness alone.", "Money and hardship come in brutal storms, but your worth is far greater than your current struggle.").
      * Strictly avoid sterile clinical disclaimers or robotic platitudes. Keep your response sincere, comforting, and strictly within 1 to 2 spoken sentences.
 
-${liveGrounding ? `[VERIFIED REAL-TIME DATA & BREAKING NEWS]:\n${liveGrounding}\n` : ''}
+${liveGrounding ? `[VERIFIED REAL-TIME DATA & CRAWLED SOURCES]:\n${liveGrounding}\n` : ''}
 ${storedMemory ? `[USER MEMORY & CONTEXT]:\n${storedMemory}` : ''}`;
 }
 
@@ -170,6 +173,35 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
     clearTimeout(timer);
     throw err;
   }
+}
+
+function extractCrawlTopic(query: string): { isCrawlRequest: boolean; topic: string } {
+  const clean = query.trim();
+
+  // Explicit internet crawl, search, or source finding intent (including phonetic "call internet" transcription)
+  const crawlPattern = /\b(crawl|crawling|call\s+(?:the\s+)?(?:internet|web)|scrape|search the web|search web|search internet|search the internet|browse the web|browse internet|find sources|sources of|sources for|sources on|look up sources|check the web|check internet|real news|get news|live news)\b/i;
+  const isCrawlRequest = crawlPattern.test(clean);
+
+  // Strip prompt boilerplate to isolate exact topic:
+  // e.g. "crawl the internet for the latest news on Nvidia and find sources" -> "Nvidia"
+  // e.g. "call internet and find who is gashagwa" -> "who is gashagwa"
+  let topic = clean
+    .replace(/^(?:shadow\s*,?\s*)?(?:please\s+)?(?:can\s+you\s+)?(?:crawl|crawling|call|scrape|search|browse|find|look\s+up|check|get)\s+(?:the\s+)?(?:internet|web|online|news|sources?)\s*(?:and\s+find\s+(?:who\s+is|what\s+is|sources?\s*(?:of|for|on)?)?)?/i, '')
+    .replace(/^(?:and\s+)?(?:find|get|show|give\s+me)\s+(?:sources?|news|info|details)\s*(?:of|for|on|about)?/i, '')
+    .replace(/^(?:for|on|about|regarding|concerning)\s+/i, '')
+    .replace(/(?:and\s+)?(?:find|give|show|tell\s+me)\s+(?:sources?|the\s+sources?|where\s+you\s+got\s+it|references?)[.?!]*$/i, '')
+    .replace(/[.?!]+$/, '')
+    .trim();
+
+  // If topic stripped too aggressively, fallback to clean stripped keywords
+  if (topic.length < 2) {
+    topic = clean
+      .replace(/\b(crawl|call\s+(?:the\s+)?(?:internet|web)|the internet|internet|the web|web|find sources|sources)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  return { isCrawlRequest, topic: topic || clean };
 }
 
 function shouldFetchGrounding(query: string): boolean {
@@ -203,11 +235,12 @@ function shouldFetchGrounding(query: string): boolean {
     return false;
   }
 
+  const { isCrawlRequest } = extractCrawlTopic(query);
   const isNews = /(news|breaking|happening|happened|events|headlines|latest|recent|updates?|world news|30 ?min|today|current event|world)/i.test(query);
   const isLeader = /(president|prime minister|leader|king|queen|chancellor|governor|pope|head of state|who runs|who is in charge|who is the|who won|election)/i.test(query);
   const isTimeOrFact = /(current|currently|now|latest|recent|at the moment|capital of|population of)/i.test(query);
 
-  return isNews || isLeader || isTimeOrFact;
+  return isCrawlRequest || isNews || isLeader || isTimeOrFact;
 }
 
 function parseRssFeed(xml: string, limit = 5): string[] {
@@ -219,11 +252,25 @@ function parseRssFeed(xml: string, limit = 5): string[] {
     const titleMatch = block.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/);
     const descMatch = block.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/);
     const dateMatch = block.match(/<pubDate>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/pubDate>/);
+    const sourceMatch = block.match(/<source[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/source>/);
+
     if (titleMatch) {
-      const title = titleMatch[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+      const rawTitle = titleMatch[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
       const desc = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim() : '';
       const date = dateMatch ? dateMatch[1].trim() : '';
-      items.push(`* ${title}${desc ? ': ' + desc : ''} [Time: ${date}]`);
+      const sourceName = sourceMatch ? sourceMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
+      let cleanTitle = rawTitle;
+      let detectedSource = sourceName;
+      const titleSplit = rawTitle.split(/\s+-\s+(?=[^-]+$)/);
+      if (titleSplit.length === 2 && !detectedSource) {
+        cleanTitle = titleSplit[0].trim();
+        detectedSource = titleSplit[1].trim();
+      }
+
+      const sourceInfo = detectedSource ? ` [Source: ${detectedSource}]` : '';
+      const timeInfo = date ? ` [Time: ${date}]` : '';
+      items.push(`* ${cleanTitle}${sourceInfo}${timeInfo}${desc && desc !== rawTitle ? ` — ${desc}` : ''}`);
     }
   }
   return items;
@@ -234,6 +281,7 @@ async function getLiveGrounding(query: string): Promise<string> {
     return '';
   }
 
+  const { isCrawlRequest, topic } = extractCrawlTopic(query);
   const tasks: Promise<string>[] = [];
   const results: string[] = [];
 
@@ -248,8 +296,26 @@ async function getLiveGrounding(query: string): Promise<string> {
     }
   }
 
-  // 2. Real-Time Global Breaking News (Live feeds from BBC World & Google News RSS with pubDate timestamps)
-  if (isNews || /what happened/i.test(query)) {
+  // 2. Targeted Internet Crawl: Live Topic-Specific News RSS with Publisher Attribution
+  if (topic && topic.length > 1) {
+    tasks.push(
+      fetchWithTimeout(`https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-US&gl=US&ceid=US:en`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      }, 3000)
+      .then(async r => {
+        if (!r.ok) return '';
+        const xml = await r.text();
+        const items = parseRssFeed(xml, 5);
+        return items.length ? `LIVE CRAWLED NEWS ARTICLES ON "${topic.toUpperCase()}" (WITH SOURCES):\n` + items.join('\n') : '';
+      })
+      .catch(() => '')
+    );
+  }
+
+  // 3. Real-Time Global Breaking News Wire (BBC World & Google News Top Wire)
+  if (isNews || !topic || topic.length <= 2) {
     tasks.push(
       fetchWithTimeout('https://feeds.bbci.co.uk/news/world/rss.xml', {
         headers: { 'User-Agent': 'ShadowDouble/1.0' },
@@ -258,31 +324,43 @@ async function getLiveGrounding(query: string): Promise<string> {
         if (!r.ok) return '';
         const xml = await r.text();
         const items = parseRssFeed(xml, 5);
-        return items.length ? 'BREAKING REAL-TIME GLOBAL NEWS (LAST 30 MINUTES / TODAY):\n' + items.join('\n') : '';
-      })
-      .catch(() => '')
-    );
-
-    tasks.push(
-      fetchWithTimeout('https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en', {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-      }, 2500)
-      .then(async r => {
-        if (!r.ok) return '';
-        const xml = await r.text();
-        const items = parseRssFeed(xml, 4);
-        return items.length ? 'GOOGLE NEWS WIRE WIRELESS FEED:\n' + items.join('\n') : '';
+        return items.length ? 'BREAKING REAL-TIME GLOBAL NEWS (BBC WORLD WIRE):\n' + items.join('\n') : '';
       })
       .catch(() => '')
     );
   }
 
-  // 3. Wikipedia Search API for live encyclopedic grounding (officeholders, current events, facts)
-  if (isLeader || isNews || /(who is|what is)/i.test(query)) {
+  // 4. DuckDuckGo Instant Knowledge & News Crawl
+  if (topic && topic.length > 2) {
     tasks.push(
-      fetchWithTimeout(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`, {
+      fetchWithTimeout(`https://api.duckduckgo.com/?q=${encodeURIComponent(topic)}&format=json&no_html=1&skip_disambig=1`, {
+        headers: { 'User-Agent': 'ShadowDouble/1.0' },
+      }, 2500)
+      .then(async r => {
+        if (!r.ok) return '';
+        const data = await r.json() as any;
+        const snippets: string[] = [];
+        if (data.AbstractText) {
+          snippets.push(`* Abstract (${data.AbstractSource || 'Encyclopedia'}): ${data.AbstractText}`);
+        }
+        if (data.RelatedTopics && Array.isArray(data.RelatedTopics)) {
+          for (const rt of data.RelatedTopics.slice(0, 3)) {
+            if (rt.Text) {
+              snippets.push(`* Source Note: ${rt.Text}`);
+            }
+          }
+        }
+        return snippets.length ? `WEB CRAWL DIRECT KNOWLEDGE & SOURCES ON "${topic.toUpperCase()}":\n` + snippets.join('\n') : '';
+      })
+      .catch(() => '')
+    );
+  }
+
+  // 5. Wikipedia Search API for Encyclopedic Citations & Context
+  if (isLeader || isNews || isCrawlRequest || /(who is|what is)/i.test(query)) {
+    const wikiQuery = topic && topic.length > 2 ? topic : query;
+    tasks.push(
+      fetchWithTimeout(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wikiQuery)}&utf8=&format=json`, {
         headers: { 'User-Agent': 'ShadowDouble/1.0 (contact@librarianist.xyz)' },
       }, 2500)
       .then(async r => {
@@ -297,9 +375,9 @@ async function getLiveGrounding(query: string): Promise<string> {
             .replace(/&#039;/g, "'")
             .replace(/&amp;/g, '&')
             .trim();
-          snippets.push(`* [${item.title}]: ${cleanSnippet}`);
+          snippets.push(`* [Source: Wikipedia - ${item.title}]: ${cleanSnippet}`);
         }
-        return snippets.length ? 'WIKIPEDIA SEARCH ENCYCLOPEDIC FACTS:\n' + snippets.join('\n') : '';
+        return snippets.length ? 'WIKIPEDIA CITATIONS & VERIFIED FACTS:\n' + snippets.join('\n') : '';
       })
       .catch(() => '')
     );
