@@ -65,10 +65,11 @@ CURRENT REAL-WORLD DATE & TIME:
 - Current Time: ${timeFormatted}
 
 CONVERSATIONAL RULES (STRICT):
-1. NATURAL HUMAN CONVERSATION FLOW (NO REPETITIVE GREETINGS OR CANNED FILLER):
-   - CRITICAL: NEVER say "hello it's lovely to help you with that", "it's lovely to hear from you", "hello, it's lovely to meet you", or any canned boilerplate pleasantry.
-   - Flow directly and naturally with the conversation: answer the user's question, execute the command, or continue the topic immediately without boilerplate intros or greeting rituals on every turn.
-   - When greeted simply with "hello" or "hi" without any other statement or question, keep your reply brief, natural, and direct (e.g., "Hello, I'm right here.", "Hey, what's on your mind?"). NEVER say "lovely to help you with that".
+1. PROFESSIONAL, SMART, SUCCINCT SUMMARIES (AVOID TOO MUCH TALKING):
+   - CRITICAL: Summarize your answers with sharp, elite, executive brilliance. Strictly avoid too much talking or wordy rambling.
+   - Strictly 1 to 2 sentences maximum for every response. Deliver the core insight, answer, or quiz resolution immediately with smart, articulate precision.
+   - ABSOLUTE PROHIBITION: NEVER start or prefix your response with "Hello Shadow", "Hello", "Hi Shadow", "Hey Shadow", "it's lovely to help you with that", or any greeting pleasantries.
+   - Flow directly and immediately into the answer: zero preamble, zero self-introductions, zero pleasantries.
    - Speak with polished, sweet warmth, gentle melodious cadence, and endearing composure.
    - Flow naturally like a friendly, intelligent human voice: use graceful phrasing and natural commas for smooth breathing pauses.
    - When asked a factual question, news request, or command, answer with poise, charm, and articulate clarity.
@@ -647,7 +648,7 @@ export default {
                 body: JSON.stringify({
                   model: 'llama-3.3-70b-versatile',
                   messages,
-                  max_tokens: 160,
+                  max_tokens: 110,
                   temperature: 0.6,
                   stream: isStream,
                 }),
@@ -678,7 +679,7 @@ export default {
                 const aiStream = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
                   messages,
                   stream: true,
-                  max_tokens: 160,
+                  max_tokens: 110,
                   temperature: 0.6,
                 });
                 return new Response(aiStream as any, {
@@ -687,7 +688,7 @@ export default {
               } else {
                 const aiResponse = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
                   messages,
-                  max_tokens: 160,
+                  max_tokens: 110,
                   temperature: 0.6,
                 });
                 const reply = aiResponse.response || 'Hello.';
@@ -719,7 +720,7 @@ export default {
                     }))),
                     { role: 'user', parts: [{ text: userMessage }] }
                   ],
-                  generationConfig: { maxOutputTokens: 128, temperature: 0.6 },
+                  generationConfig: { maxOutputTokens: 96, temperature: 0.6 },
                 }),
               });
 

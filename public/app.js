@@ -1039,8 +1039,9 @@ function sanitizeSpeechText(text) {
   }
 
   var clean = text.replace(/\[\[[A-Z_]+(?::[^\]]*)?\]\]/gi, '').trim();
-  // Strip repetitive canned greeting filler ("hello it's lovely to help you with that", "lovely to hear from you", etc.)
-  clean = clean.replace(/^(?:hello[!,.]?\s*)?(?:it's\s+|its\s+)?lovely\s+to\s+(?:help\s+you(?:\s+with\s+that)?|hear\s+from\s+you|meet\s+you)[!,.]?\s*/i, '');
+  // Strip any leading greeting or canned filler ("hello shadow", "hi shadow", "hello", "it's lovely to help you", etc.)
+  clean = clean.replace(/^(?:(?:hey|hi|hello)\s+(?:shadow|there)?|hello[!,.]?|hi[!,.]?|hey[!,.]?)\s*/i, '');
+  clean = clean.replace(/^(?:it's\s+|its\s+)?lovely\s+to\s+(?:help\s+you(?:\s+with\s+that)?|hear\s+from\s+you|meet\s+you)[!,.]?\s*/i, '');
   return clean.trim();
 }
 
@@ -1154,6 +1155,22 @@ async function streamConversation(userPrompt) {
   isAcousticallySilenced = false;
   conversationTurnId++;
   var thisTurnId = conversationTurnId;
+
+  // If user simply said a bare greeting / wake word without an actual quiz or command:
+  var isBareGreeting = /^(?:(?:hey|ok|okay|hi|hello|yo)\s+)?(?:shadow|shadows)?[.!?]?$/i.test(cleanPrompt) || /^(?:hello|hi|hey|yo|good\s+(?:morning|afternoon|evening|day))[.!?]?$/i.test(cleanPrompt);
+  if (isBareGreeting) {
+    console.log('[BARE GREETING]: No quiz or command thrown - strictly maintaining silence and attentive posture');
+    maintainActiveConversation();
+    idleGazeDirection.x = 0;
+    idleGazeDirection.y = 0;
+    mouthTarget.openness = 0.0;
+    mouthTarget.smile = 0.04;
+    mouthTarget.teethVisible = 0.0;
+    triggerBlink();
+    isAwaitingResponse = false;
+    resumeMicrophone(300);
+    return;
+  }
 
   // Abort previous fetch/stream if still active
   if (currentStreamAbortController) {
@@ -1802,15 +1819,15 @@ window.ShadowMouth = {
     idleGazeDirection.x = 0;
     idleGazeDirection.y = 0;
 
-    // Attentive alert mouth posture
-    mouthTarget.openness = 0.12;
-    mouthTarget.smile = 0.22;
-    mouthTarget.teethVisible = 0.40;
-
-    // Trigger visual wake blink
+    // Visual alert gaze: eyes attentive, mouth shut, waiting for quiz/command
+    idleGazeDirection.x = 0;
+    idleGazeDirection.y = 0;
+    mouthTarget.openness = 0.0;
+    mouthTarget.smile = 0.04;
+    mouthTarget.teethVisible = 0.0;
     triggerBlink();
 
-    // If a trailing command was given in the same breath ("Hey Shadow what time is it", "Hey hello who are you"):
+    // If a trailing command/quiz was given in the same breath ("Hey Shadow what time is it", "Hey hello who won the match"):
     if (trailingCommand && trailingCommand.trim().length > 1) {
       console.log('[WAKE-WORD] Executing trailing command:', trailingCommand);
       pauseMicrophone();
@@ -1818,19 +1835,8 @@ window.ShadowMouth = {
       return;
     }
 
-    // Direct greeting acknowledgment from silence
-    var cleanPhrase = (phrase || '').toLowerCase();
-    var wakeAck = "I'm listening.";
-    if (cleanPhrase.indexOf('hello') !== -1 || cleanPhrase.indexOf('hi') !== -1 || cleanPhrase.indexOf('morning') !== -1 || cleanPhrase.indexOf('evening') !== -1 || cleanPhrase.indexOf('day') !== -1) {
-      wakeAck = "Hello! I'm here and listening.";
-    } else if (cleanPhrase.indexOf('wake') !== -1 || cleanPhrase.indexOf('awake') !== -1) {
-      wakeAck = "I'm awake and standing guard.";
-    } else if (cleanPhrase.indexOf('there') !== -1) {
-      wakeAck = "Yes, I'm right here.";
-    } else if (cleanPhrase.indexOf('what') !== -1) {
-      wakeAck = "All systems alert and listening.";
-    }
-    enqueueSpeechClause(wakeAck);
+    // When no quiz or command was thrown, NEVER respond verbally! Keep completely quiet and attentive
+    console.log('[WAKE-WORD]: No quiz or command thrown - strictly maintaining silence and listening.');
   },
 
   // Conversational follow-up speech captured by native on-device engine
