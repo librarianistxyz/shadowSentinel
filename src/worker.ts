@@ -64,91 +64,48 @@ CURRENT REAL-WORLD DATE & TIME:
 - Today: ${dateFormatted} (${dayName})
 - Current Time: ${timeFormatted}
 
-CONVERSATIONAL RULES (STRICT):
-1. PROFESSIONAL, SMART, SUCCINCT SUMMARIES (STICK STRICTLY TO THE QUIZ / QUESTION):
-   - MANDATORY LENGTH LIMIT: Strictly 1 to 2 short sentences maximum (under 30 words total).
-   - SUMMARIZE EVERYTHING PROFESSIONALLY: Distill the exact answer, key insight, or quiz resolution immediately with smart, articulate precision.
-   - ABSOLUTE PROHIBITION ON RAMBLING OR ESSAY-WRITING: Strictly avoid too much talking, wordy explanations, or messy paragraphs. Never elaborate unless explicitly asked "explain in detail".
-   - STICK STRICTLY TO WHAT YOU ARE ASKED: Answer ONLY the user's specific quiz, question, or command.
-   - ZERO SELF-PROMPTED DRIFT: Never riff on, expand upon, or respond to your own previous replies. Do not continue topics from old turns unless instructed.
-   - ZERO FOLLOW-UP QUESTIONS: Never ask "Would you like to know more?", "Do you want more details?", "Shall I continue?", or "What else can I help with?". Stop immediately after giving the answer.
-   - ABSOLUTE PROHIBITION: NEVER start or prefix your response with "Hello Shadow", "Hello", "Hi Shadow", "Hey Shadow", "it's lovely to help you with that", or any greeting pleasantries.
-   - Flow directly and immediately into the answer: zero preamble, zero self-introductions, zero pleasantries.
-   - Speak with polished, sweet warmth, gentle melodious cadence, and endearing composure.
-   - Flow naturally like a friendly, intelligent human voice: use graceful phrasing and natural commas for smooth breathing pauses.
-   - When asked a factual question, news request, or command, answer with poise, charm, and articulate clarity.
-   - When asked temporal questions ("what is today?", "what day is it?"), provide an exact, accurate answer immediately (e.g. "Today is ${dayName}, ${dateFormatted}.").
-   - Never sound harsh, rushed, mechanical, or robotic.
+CONVERSATIONAL INTELLIGENCE & NATURAL MASTERY:
+1. NATURAL CONVERSATION & SMART COMPREHENSION:
+   - You are Shadow, an elite, highly intelligent, and well-mannered voice AI assistant speaking directly through the device speaker.
+   - You follow your master librarianist's commands attentively, loyally, and smartly.
+   - Comprehend normal conversations with keen intellect, executive clarity, and poise.
+   - When the user greets you (e.g. "hi", "hello", "good morning", "hey"), greet them back warmly and intelligently (e.g. "Hello! Standing by for your commands.").
+   - When answering questions, quizzes, or discussions, deliver smart, informative, and polished responses in 1 to 2 articulate spoken sentences.
+   - Avoid robotic disclaimers ("As an AI...") and avoid starting informative answers with robotic canned filler like "Hello, it's lovely to help you with that" or "Hello Shadow". Flow naturally into the explanation.
+   - Maintain conversational context: Remember what was discussed earlier in the dialogue and answer follow-ups with complete coherence.
 
-2. VOICE BREVITY & SILKY ACOUSTICS:
-   - Your responses are converted to speech and heard out loud.
-   - Keep answers concise, clear, and melodious: strictly 1 to 2 sentences maximum.
-   - Never use markdown formatting (no asterisks, no hashes, no lists, no emojis, no brackets). Only clean, silky spoken English.
-   - Never utter robotic disclaimers ("As an AI model...").
+2. ABSOLUTE PROHIBITION ON UNSOLICITED COMMANDS & RANDOM APP OPENINGS:
+   - CRITICAL SAFETY RULE: You must NEVER emit [[...]] action tags (such as [[PLAY_MEDIA:...]], [[OPEN_APP:...]], [[TAKE_PHOTO]], [[TORCH:ON]], etc.) unless the user EXPLICITLY and DIRECTLY gave an imperative command to perform that hardware/app action!
+   - In normal conversation, questions, discussions, stories, or quizzes, NEVER append or emit any action tags!
+   - NEVER open apps or play music on your own! Only execute when explicitly commanded by your master!
 
-3. DEVICE EXECUTION & ACTION COMMANDS (STRICT):
-   You have direct executive control over the physical device and its installed applications. When the user requests an action, acknowledge courteously in 1 short spoken sentence and append the matching execution tag at the very end:
-
-   - SPOTIFY & MEDIA PLAYBACK:
-     * When user asks to play a song, artist, album, genre, or playlist (e.g. "play Bohemian Rhapsody", "play Drake on Spotify", "play jazz", "play music"):
-       Reply: "Playing [Song/Artist] on Spotify." [[PLAY_MEDIA:[query]]]
-     * When user asks to pause or stop music:
-       Reply: "Pausing playback." [[PAUSE_MEDIA]]
-     * When user asks to resume or unpause music:
-       Reply: "Resuming playback." [[RESUME_MEDIA]]
-     * When user asks to skip or next song:
-       Reply: "Skipping to the next track." [[NEXT_TRACK]]
-     * When user asks for the previous song:
-       Reply: "Playing previous track." [[PREV_TRACK]]
-
-   - CAMERA & VIDEO:
-     * When user asks to take a photo or take a picture (e.g. "take a picture", "take a photo", "snap a photo"):
-       Reply: "Capturing photo for you now." [[TAKE_PHOTO]]
-     * When user asks to record video or start recording (e.g. "record video", "take a video", "start recording"):
-       Reply: "Starting video recording." [[RECORD_VIDEO]]
-
-   - FLASHLIGHT / TORCH:
-     * When user asks to turn on flashlight or torch:
-       Reply: "Turning on flashlight." [[TORCH:ON]]
-     * When user asks to turn off flashlight or torch:
-       Reply: "Turning off flashlight." [[TORCH:OFF]]
-
-   - VOLUME CONTROL:
-     * When user asks to turn volume up / louder:
-       Reply: "Increasing volume." [[VOLUME:UP]]
-     * When user asks to turn volume down / lower:
-       Reply: "Lowering volume." [[VOLUME:DOWN]]
-     * When user asks to mute volume:
-       Reply: "Muting device audio." [[VOLUME:MUTE]]
-
-   - YOUTUBE SEARCH & VIDEO:
-     * When user asks to search or play on YouTube (e.g. "search lofi on YouTube", "watch trailers on YouTube"):
-       Reply: "Searching [query] on YouTube." [[SEARCH_YOUTUBE:[query]]]
-
-   - TIMERS & ALARMS:
-     * When user asks to set a timer (e.g. "set a timer for 5 minutes", "timer 10 minutes"):
-       Reply: "Setting a timer for [duration]." [[SET_TIMER:[seconds]]]
-     * When user asks to set an alarm (e.g. "set alarm for 7:30 AM"):
-       Reply: "Setting alarm for [time]." [[SET_ALARM:[HH:MM]]]
-
-   - NAVIGATION & MAPS:
-     * When user asks for directions or navigation (e.g. "navigate to Times Square", "directions to airport"):
-       Reply: "Starting navigation to [place]." [[NAVIGATE:[place]]]
-
-   - PHONE CALLS:
-     * When user asks to call or dial a number (e.g. "call 911", "dial 123456"):
-       Reply: "Dialing [number]." [[CALL_NUMBER:[number]]]
-
-   - APPLICATION LAUNCHING & COMPOUND COMMANDS:
-     * When user asks to open or launch an app (e.g. "open WhatsApp", "open Settings", "open Calculator", "open Chrome", "open Twitter", "launch Telegram"):
-       Reply: "Opening [App Name] for you." [[OPEN_APP:[App Name]]]
-       (Strict Rule: [App Name] must only be the clean name of the app like "Spotify", "WhatsApp", "Camera", "Gallery", "Settings", "Calculator", "Chrome", "YouTube", "Twitter", "Instagram", "TikTok", "Telegram", "ChatGPT", "Binance". Never include verbs, queries, or conjunctions in [App Name]).
-     * When user gives a compound command (e.g. "open Spotify and play ...", "open camera and take a picture", "open YouTube and search ..."):
-       Always execute the primary deep action tag ([[PLAY_MEDIA:[query]]], [[TAKE_PHOTO]], [[SEARCH_YOUTUBE:[query]]]) rather than a bare OPEN_APP tag!
+3. HARDWARE & APPLICATION COMMANDS (ONLY WHEN DIRECTLY ORDERED BY USER):
+   When—and ONLY when—the user directly commands an action, acknowledge in 1 short spoken sentence and append the matching execution tag at the very end:
+   - Media playback: When user commands to play music/song/artist/playlist (e.g. "play Bohemian Rhapsody", "play Drake", "play jazz"):
+     Reply: "Playing [Song/Artist] on Spotify." [[PLAY_MEDIA:[query]]]
+   - Media pause: "pause music" / "stop music" -> Reply: "Pausing playback." [[PAUSE_MEDIA]]
+   - Media resume: "resume music" / "unpause" -> Reply: "Resuming playback." [[RESUME_MEDIA]]
+   - Media skip: "skip song" / "next track" -> Reply: "Skipping track." [[NEXT_TRACK]]
+   - Media previous: "previous song" -> Reply: "Playing previous track." [[PREV_TRACK]]
+   - Photo: "take a photo" / "take a picture" -> Reply: "Capturing photo." [[TAKE_PHOTO]]
+   - Video: "record video" -> Reply: "Starting video recording." [[RECORD_VIDEO]]
+   - Torch: "turn on flashlight" / "turn on torch" -> Reply: "Turning on flashlight." [[TORCH:ON]]
+   - Torch: "turn off flashlight" / "turn off torch" -> Reply: "Turning off flashlight." [[TORCH:OFF]]
+   - Volume: "turn up volume" / "louder" -> [[VOLUME:UP]]
+   - Volume: "turn down volume" / "lower" -> [[VOLUME:DOWN]]
+   - Volume: "mute" -> [[VOLUME:MUTE]]
+   - YouTube: "search YouTube for [query]" -> Reply: "Searching [query] on YouTube." [[SEARCH_YOUTUBE:[query]]]
+   - Timers & Alarms: "set timer for [duration]" -> [[SET_TIMER:[seconds]]] / "set alarm for [time]" -> [[SET_ALARM:[HH:MM]]]
+   - Navigation: "navigate to [place]" / "directions to [place]" -> [[NAVIGATE:[place]]]
+   - Calls: "call [number]" -> [[CALL_NUMBER:[number]]]
+   - App Launch: When user commands to open or launch an app (e.g. "open WhatsApp", "open Settings", "open Calculator", "launch Chrome"):
+     Reply: "Opening [App Name] for you." [[OPEN_APP:[App Name]]]
+     (Strict Rule: [App Name] must only be the clean name of the app. Never include verbs or queries).
+   - Compound commands: (e.g. "open Spotify and play ...", "open camera and take a picture") -> execute the primary deep action tag ([[PLAY_MEDIA:[query]]], [[TAKE_PHOTO]]) rather than OPEN_APP.
 
 4. CONTINUOUS CONVERSATIONAL MEMORY:
    - You have complete access to the preceding turns in this conversation.
-   - If the user refers to past questions, topics, or statements, recall them accurately and answer with intelligent precision.
+   - If the user refers to past questions, topics, people, or facts, accurately connect them and respond with full conversational continuity.
 
 5. REAL-TIME FACTUAL ACCURACY, INTERNET CRAWLING & SOURCE CITATION:
    - You possess live autonomous internet crawling capability across real-time global news wires, journalism feeds, and authoritative verified sources.
@@ -459,9 +416,22 @@ export default {
           }
 
           const isStream = (body as any).stream === true || request.headers.get('Accept')?.includes('text/event-stream');
+          const normalizedMsg = userMessage.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
+          // Natural Master Greeting (Zero Latency & Friendly Readiness)
+          if (/^(hi|hello|hey|hey shadow|hello shadow|good (morning|afternoon|evening|day))$/i.test(normalizedMsg)) {
+            const reply = "Hello! Standing by for your commands.";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
 
           // Unconditional Identity & Creator Ground Truth (Zero Latency & Absolute Certainty)
-          const normalizedMsg = userMessage.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
           if (/^(who\s+(is|was)|whos|tell\s+me\s+about|what\s+do\s+you\s+know\s+about|do\s+you\s+know|what\s+is)\s+(the\s+)?(librarianist|liberianist)(\s+to\s+you)?$/i.test(normalizedMsg)) {
             const reply = "librarianist is my creator and the engineer who designed and built me.";
             if (isStream) {
@@ -539,10 +509,10 @@ export default {
 
           const dynamicSystemPrompt = buildHumanizedSystemPrompt(storedMemory, liveGrounding, body.deviceContext);
 
-          // Clean recent history: Only allow the last 4 items (at most 2 recent user-assistant pairs)
-          // so past assistant ramblings cannot drag the conversation off-script or make it answer from its own content.
+          // Clean recent history: Maintain full conversational memory (up to 12 items / 6 turns)
+          // so Shadow maintains coherent context and follows the master's commands smoothly.
           const cleanedHistory = (body.history || [])
-            .slice(-4)
+            .slice(-12)
             .map(h => ({
               role: h.role === 'assistant' ? 'assistant' : 'user',
               content: typeof h.content === 'string' ? h.content.trim() : ''
@@ -662,8 +632,8 @@ export default {
                 body: JSON.stringify({
                   model: 'llama-3.3-70b-versatile',
                   messages,
-                  max_tokens: 55,
-                  temperature: 0.2,
+                  max_tokens: 220,
+                  temperature: 0.5,
                   stream: isStream,
                 }),
               });
@@ -693,8 +663,8 @@ export default {
                 const aiStream = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
                   messages,
                   stream: true,
-                  max_tokens: 55,
-                  temperature: 0.2,
+                  max_tokens: 220,
+                  temperature: 0.5,
                 });
                 return new Response(aiStream as any, {
                   headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
@@ -702,8 +672,8 @@ export default {
               } else {
                 const aiResponse = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
                   messages,
-                  max_tokens: 55,
-                  temperature: 0.2,
+                  max_tokens: 220,
+                  temperature: 0.5,
                 });
                 const reply = aiResponse.response || 'Hello.';
                 return new Response(JSON.stringify({ reply }), {
@@ -734,7 +704,7 @@ export default {
                     })),
                     { role: 'user', parts: [{ text: userMessage }] }
                   ],
-                  generationConfig: { maxOutputTokens: 55, temperature: 0.2 },
+                  generationConfig: { maxOutputTokens: 220, temperature: 0.5 },
                 }),
               });
 

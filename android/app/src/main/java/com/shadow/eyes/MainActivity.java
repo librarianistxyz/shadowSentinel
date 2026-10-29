@@ -38,6 +38,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     public volatile boolean isNativeSpeaking = false;
     public volatile int activeUtterances = 0;
     public volatile long speechSessionId = 0;
+    public volatile long lastTtsEndTime = 0;
+    public volatile String lastSpokenSentence = "";
     public WakeWordEngine wakeWordEngine;
     final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -96,6 +98,53 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
         @Override
         public void run() {
+            if (activity == null || speechText == null || speechText.trim().isEmpty())
+                return;
+
+            long now = System.currentTimeMillis();
+            boolean isSpeaking = activity.isNativeSpeaking
+                    || (activity.textToSpeech != null && activity.textToSpeech.isSpeaking());
+            if (isSpeaking) {
+                android.util.Log.i("ShadowEyes",
+                        "Acoustic shield: Dropped speech recognized while TTS is speaking: '" + speechText + "'");
+                return;
+            }
+
+            if (now - activity.lastTtsEndTime < 850) {
+                android.util.Log.i("ShadowEyes", "Acoustic shield: Dropped speech recognized within 850ms cooldown ("
+                        + (now - activity.lastTtsEndTime) + "ms): '" + speechText + "'");
+                return;
+            }
+
+            // Substring / Echo suppression against last spoken sentence
+            String cleanRecognized = speechText.replaceAll("[^a-zA-Z0-9 ]", "").toLowerCase(java.util.Locale.ROOT)
+                    .trim();
+            String cleanSpoken = activity.lastSpokenSentence.replaceAll("[^a-zA-Z0-9 ]", "")
+                    .toLowerCase(java.util.Locale.ROOT).trim();
+            if (!cleanRecognized.isEmpty() && !cleanSpoken.isEmpty()) {
+                if (cleanSpoken.contains(cleanRecognized) || cleanRecognized.contains(cleanSpoken)) {
+                    android.util.Log.i("ShadowEyes",
+                            "Acoustic shield: Dropped recognized audio matching Shadow's own spoken sentence ('"
+                                    + cleanRecognized + "' in '" + cleanSpoken + "')");
+                    return;
+                }
+                String[] words = cleanRecognized.split("\\s+");
+                if (words.length >= 3) {
+                    int matchCount = 0;
+                    for (String w : words) {
+                        if (w.length() >= 3 && cleanSpoken.contains(w)) {
+                            matchCount++;
+                        }
+                    }
+                    if (matchCount >= words.length * 0.6) {
+                        android.util.Log.i("ShadowEyes",
+                                "Acoustic shield: Dropped recognized audio with high word overlap (" + matchCount + "/"
+                                        + words.length + ") against spoken sentence");
+                        return;
+                    }
+                }
+            }
+
             try {
                 PowerManager pm = (PowerManager) activity.getSystemService(Context.POWER_SERVICE);
                 if (pm != null) {
@@ -104,7 +153,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 }
             } catch (Exception ignored) {}
 
-            if (activity.webView != null && speechText != null) {
+            if (activity.webView != null) {
                 String js = "window.ShadowMouth && (window.ShadowMouth.onSpeechRecognized ? " +
                             "window.ShadowMouth.onSpeechRecognized(" + org.json.JSONObject.quote(speechText) + ") : " +
                             "window.ShadowMouth.onFollowUpSpeech(" + org.json.JSONObject.quote(speechText) + "));";
@@ -193,9 +242,10 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             if (activity.activeUtterances <= 0 || !stillSpeaking) {
                 activity.activeUtterances = 0;
                 activity.isNativeSpeaking = false;
+                activity.lastTtsEndTime = System.currentTimeMillis();
                 activity.notifyNativeSpeechState(false);
                 if (activity.wakeWordEngine != null) {
-                    activity.wakeWordEngine.setInterruptionOnlyMode(false);
+                    activity.wakeWordEngine.notifyTtsFinished();
                     activity.wakeWordEngine.resume();
                 }
             }
@@ -207,9 +257,10 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             if (activity.activeUtterances <= 0 || !stillSpeaking) {
                 activity.activeUtterances = 0;
                 activity.isNativeSpeaking = false;
+                activity.lastTtsEndTime = System.currentTimeMillis();
                 activity.notifyNativeSpeechState(false);
                 if (activity.wakeWordEngine != null) {
-                    activity.wakeWordEngine.setInterruptionOnlyMode(false);
+                    activity.wakeWordEngine.notifyTtsFinished();
                     activity.wakeWordEngine.resume();
                 }
             }
@@ -642,6 +693,12 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             if (activity.isTtsReady && activity.textToSpeech != null && text != null) {
                 String clean = smoothenText(text);
                 if (!clean.isEmpty()) {
+                    if (activity.activeUtterances <= 0 || activity.lastSpokenSentence == null
+                            || activity.lastSpokenSentence.isEmpty()) {
+                        activity.lastSpokenSentence = clean;
+                    } else {
+                        activity.lastSpokenSentence = activity.lastSpokenSentence + " " + clean;
+                    }
                     activity.activeUtterances++;
                     activity.isNativeSpeaking = true;
                     activity.notifyNativeSpeechState(true);
@@ -670,9 +727,10 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             }
             activity.activeUtterances = 0;
             activity.isNativeSpeaking = false;
+            activity.lastTtsEndTime = System.currentTimeMillis();
             activity.notifyNativeSpeechState(false);
             if (activity.wakeWordEngine != null) {
-                activity.wakeWordEngine.setInterruptionOnlyMode(false);
+                activity.wakeWordEngine.notifyTtsFinished();
                 activity.wakeWordEngine.resume();
             }
         }
@@ -705,6 +763,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             }
             activity.activeUtterances = 0;
             activity.isNativeSpeaking = false;
+            activity.lastTtsEndTime = System.currentTimeMillis();
             activity.notifyNativeSpeechState(false);
             if (activity.wakeWordEngine != null) {
                 activity.wakeWordEngine.setInterruptionOnlyMode(false);

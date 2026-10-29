@@ -1018,6 +1018,39 @@ function stopSpeaking() {
   resumeMicrophone(400);
 }
 
+function hasUserCommandIntent(actionType, userPrompt) {
+  if (!userPrompt) return false;
+  var p = userPrompt.toLowerCase();
+  switch (actionType) {
+    case 'PLAY_MEDIA':
+    case 'PAUSE_MEDIA':
+    case 'RESUME_MEDIA':
+    case 'NEXT_TRACK':
+    case 'PREV_TRACK':
+      return /\b(play|song|music|track|artist|album|playlist|spotify|pause|resume|skip|next|previous)\b/i.test(p);
+    case 'OPEN_APP':
+      return /\b(open|launch|start|run|go to)\b/i.test(p);
+    case 'TAKE_PHOTO':
+    case 'RECORD_VIDEO':
+      return /\b(photo|picture|snap|camera|video|record|shoot)\b/i.test(p);
+    case 'TORCH':
+      return /\b(torch|flashlight|flash|light)\b/i.test(p);
+    case 'VOLUME':
+      return /\b(volume|louder|lower|softer|quieter|mute|unmute)\b/i.test(p);
+    case 'SEARCH_YOUTUBE':
+      return /\b(youtube|video|watch)\b/i.test(p);
+    case 'NAVIGATE':
+      return /\b(navigate|navigation|directions|map|route|drive|walk)\b/i.test(p);
+    case 'SET_TIMER':
+    case 'SET_ALARM':
+      return /\b(timer|alarm)\b/i.test(p);
+    case 'CALL_NUMBER':
+      return /\b(call|dial|phone)\b/i.test(p);
+    default:
+      return false;
+  }
+}
+
 // Sanitize text and execute hardware/app action tags
 function sanitizeSpeechText(text) {
   if (!text) return '';
@@ -1027,6 +1060,12 @@ function sanitizeSpeechText(text) {
   while ((match = actionRegex.exec(text)) !== null) {
     var actionType = (match[1] || '').trim().toUpperCase();
     var payload = (match[2] || '').trim();
+
+    // STRICT USER INTENT GATE: Only execute if master actually commanded this action!
+    if (!hasUserCommandIntent(actionType, window.currentUserPrompt)) {
+      console.warn('[ACTION BLOCKED]: Discarded unsolicited action without master command intent:', actionType, payload, 'Prompt:', window.currentUserPrompt);
+      continue;
+    }
 
     console.log('[SHADOW ACTION DISPATCH]:', actionType, payload);
 
@@ -1040,8 +1079,8 @@ function sanitizeSpeechText(text) {
   }
 
   var clean = text.replace(/\[\[[A-Z_]+(?::[^\]]*)?\]\]/gi, '').trim();
-  // Strip any leading greeting or canned filler ("hello shadow", "hi shadow", "hello", "it's lovely to help you", etc.)
-  clean = clean.replace(/^(?:(?:hey|hi|hello)\s+(?:shadow|there)?|hello[!,.]?|hi[!,.]?|hey[!,.]?)\s*/i, '');
+  // Strip robotic "Hello Shadow" or canned filler ("it's lovely to help you with that")
+  clean = clean.replace(/^(?:hey|hi|hello)\s+shadow\b[!,.]?\s*/i, '');
   clean = clean.replace(/^(?:it's\s+|its\s+)?lovely\s+to\s+(?:help\s+you(?:\s+with\s+that)?|hear\s+from\s+you|meet\s+you)[!,.]?\s*/i, '');
   return clean.trim();
 }
@@ -1160,6 +1199,7 @@ async function streamConversation(userPrompt) {
   // A genuine new question or command has arrived! Clear silenced flag and advance turn ID:
   isAcousticallySilenced = false;
   lastAssistantSpokenText = "";
+  window.currentUserPrompt = cleanPrompt;
   conversationTurnId++;
   var thisTurnId = conversationTurnId;
 
@@ -1265,10 +1305,10 @@ async function streamConversation(userPrompt) {
     }
   }
 
-  // Record user turn in memory and persist (clamped to max 10 to prevent bloated context drift)
+  // Record user turn in memory and persist (up to 20 items / 10 turns for seamless conversational continuity)
   conversationHistory.push({ role: 'user', content: cleanPrompt });
-  if (conversationHistory.length > 10) {
-    conversationHistory = conversationHistory.slice(-10);
+  if (conversationHistory.length > 20) {
+    conversationHistory = conversationHistory.slice(-20);
   }
   persistHistory(conversationHistory);
 
@@ -1282,7 +1322,7 @@ async function streamConversation(userPrompt) {
       signal: currentStreamAbortController ? currentStreamAbortController.signal : undefined,
       body: JSON.stringify({
         message: cleanPrompt,
-        history: conversationHistory.slice(0, -1).slice(-4), // Strictly max 4 recent items (2 turns) so it never loses script
+        history: conversationHistory.slice(0, -1).slice(-12), // 6 conversational turns of rich context
         stream: true,
         image: capturedFrame || undefined,
         deviceContext: getDeviceDiagnostics()
@@ -1366,8 +1406,8 @@ async function streamConversation(userPrompt) {
             activeClause += token;
             
             // Natural sentence boundary: period, question mark, exclamation
-            var isSentenceTerminator = /[.!?\n]/.test(token);
-            var isLengthyClause = activeClause.trim().split(/\s+/).length >= 10;
+            var isSentenceTerminator = /[.!?]/.test(token) && activeClause.trim().split(/\s+/).length >= 4;
+            var isLengthyClause = activeClause.trim().split(/\s+/).length >= 12;
             
             if (isSentenceTerminator || isLengthyClause) {
               if (thisTurnId === conversationTurnId && !isAcousticallySilenced) {
@@ -1376,8 +1416,7 @@ async function streamConversation(userPrompt) {
               activeClause = '';
               if (isSentenceTerminator) {
                 completedSentences++;
-                if (completedSentences >= 2) {
-                  // Hard limit: Professional 1-2 sentence executive summary enforced
+                if (completedSentences >= 3) {
                   try { reader.cancel(); } catch(e) {}
                   break;
                 }
@@ -1386,7 +1425,7 @@ async function streamConversation(userPrompt) {
           }
         } catch(e) {}
       }
-      if (completedSentences >= 2) break;
+      if (completedSentences >= 3) break;
     }
     
     activeStreamReader = null;
@@ -1407,8 +1446,8 @@ async function streamConversation(userPrompt) {
     if (fullReply.trim() && !isAcousticallySilenced) {
       lastAssistantSpokenText = fullReply.trim();
       conversationHistory.push({ role: 'assistant', content: fullReply.trim() });
-      if (conversationHistory.length > 10) {
-        conversationHistory = conversationHistory.slice(-10);
+      if (conversationHistory.length > 20) {
+        conversationHistory = conversationHistory.slice(-20);
       }
       persistHistory(conversationHistory);
     } else {
