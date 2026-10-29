@@ -66,8 +66,46 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
     }
 
+    static class UtteranceStartTask implements Runnable {
+        private final WebView webView;
+        private final String utteranceId;
+        public UtteranceStartTask(WebView webView, String utteranceId) {
+            this.webView = webView;
+            this.utteranceId = utteranceId;
+        }
+        @Override
+        public void run() {
+            if (webView != null) {
+                webView.evaluateJavascript("window.onNativeSpeechUtteranceStart && window.onNativeSpeechUtteranceStart(" + org.json.JSONObject.quote(utteranceId) + ");", null);
+            }
+        }
+    }
+
+    static class UtteranceDoneTask implements Runnable {
+        private final WebView webView;
+        private final String utteranceId;
+        public UtteranceDoneTask(WebView webView, String utteranceId) {
+            this.webView = webView;
+            this.utteranceId = utteranceId;
+        }
+        @Override
+        public void run() {
+            if (webView != null) {
+                webView.evaluateJavascript("window.onNativeSpeechUtteranceDone && window.onNativeSpeechUtteranceDone(" + org.json.JSONObject.quote(utteranceId) + ");", null);
+            }
+        }
+    }
+
     public void notifyNativeSpeechState(final boolean speaking) {
         mainHandler.post(new SpeechStateTask(webView, speaking));
+    }
+
+    public void notifyUtteranceStart(final String utteranceId) {
+        mainHandler.post(new UtteranceStartTask(webView, utteranceId));
+    }
+
+    public void notifyUtteranceDone(final String utteranceId) {
+        mainHandler.post(new UtteranceDoneTask(webView, utteranceId));
     }
 
     static class WakeWordStateTask implements Runnable {
@@ -110,39 +148,33 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 return;
             }
 
-            if (now - activity.lastTtsEndTime < 75) {
-                android.util.Log.i("ShadowEyes", "Acoustic shield: Dropped speech recognized within 75ms cooldown ("
-                        + (now - activity.lastTtsEndTime) + "ms): '" + speechText + "'");
-                return;
-            }
-
-            // Substring / Echo suppression against last spoken sentence
-            String cleanRecognized = speechText.replaceAll("[^a-zA-Z0-9 ]", "").toLowerCase(java.util.Locale.ROOT)
-                    .trim();
-            String cleanSpoken = activity.lastSpokenSentence.replaceAll("[^a-zA-Z0-9 ]", "")
-                    .toLowerCase(java.util.Locale.ROOT).trim();
-            if (!cleanRecognized.isEmpty() && !cleanSpoken.isEmpty()) {
-                if (cleanSpoken.contains(cleanRecognized) || cleanRecognized.contains(cleanSpoken)) {
-                    android.util.Log.i("ShadowEyes",
-                            "Acoustic shield: Dropped recognized audio matching Shadow's own spoken sentence ('"
-                                    + cleanRecognized + "' in '" + cleanSpoken + "')");
-                    return;
-                }
-                String[] words = cleanRecognized.split("\\s+");
-                if (words.length >= 3) {
-                    int matchCount = 0;
-                    for (String w : words) {
-                        if (w.length() >= 3 && cleanSpoken.contains(w)) {
-                            matchCount++;
-                        }
-                    }
-                    if (matchCount >= words.length * 0.6) {
-                        android.util.Log.i("ShadowEyes",
-                                "Acoustic shield: Dropped recognized audio with high word overlap (" + matchCount + "/"
-                                        + words.length + ") against spoken sentence");
+            long timeSinceTts = now - activity.lastTtsEndTime;
+            // Acoustic shield: If TTS just finished speaking within 500ms, suppress acoustic echo
+            if (timeSinceTts < 500 && activity.lastSpokenSentence != null && !activity.lastSpokenSentence.isEmpty()) {
+                String cleanRecognized = speechText.replaceAll("[^a-zA-Z0-9 ]", "").toLowerCase(java.util.Locale.ROOT).trim();
+                String cleanSpoken = activity.lastSpokenSentence.replaceAll("[^a-zA-Z0-9 ]", "").toLowerCase(java.util.Locale.ROOT).trim();
+                if (!cleanRecognized.isEmpty() && !cleanSpoken.isEmpty()) {
+                    if (cleanSpoken.contains(cleanRecognized) || cleanRecognized.contains(cleanSpoken)) {
+                        android.util.Log.i("ShadowEyes", "Acoustic shield: Dropped echo within " + timeSinceTts + "ms matching spoken text: '" + cleanRecognized + "'");
                         return;
                     }
+                    String[] words = cleanRecognized.split("\\s+");
+                    if (words.length >= 3) {
+                        int matchCount = 0;
+                        for (String w : words) {
+                            if (w.length() >= 3 && cleanSpoken.contains(w)) {
+                                matchCount++;
+                            }
+                        }
+                        if (matchCount >= words.length * 0.6) {
+                            android.util.Log.i("ShadowEyes", "Acoustic shield: Dropped echo within " + timeSinceTts + "ms with high word overlap (" + matchCount + "/" + words.length + ") against spoken sentence");
+                            return;
+                        }
+                    }
                 }
+            } else if (timeSinceTts >= 500) {
+                // Clear spoken sentence once acoustic reflection window has passed
+                activity.lastSpokenSentence = "";
             }
 
             try {
@@ -243,6 +275,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         public void onStart(String utteranceId) {
             activity.isNativeSpeaking = true;
             activity.notifyNativeSpeechState(true);
+            activity.notifyUtteranceStart(utteranceId);
             if (activity.wakeWordEngine != null) {
                 activity.wakeWordEngine.setInterruptionOnlyMode(true);
             }
@@ -250,6 +283,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         @Override
         public void onDone(String utteranceId) {
             activity.activeUtterances--;
+            activity.notifyUtteranceDone(utteranceId);
             boolean stillSpeaking = activity.textToSpeech != null && activity.textToSpeech.isSpeaking();
             if (activity.activeUtterances <= 0 || !stillSpeaking) {
                 activity.activeUtterances = 0;
@@ -265,6 +299,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         @Override
         public void onError(String utteranceId) {
             activity.activeUtterances--;
+            activity.notifyUtteranceDone(utteranceId);
             boolean stillSpeaking = activity.textToSpeech != null && activity.textToSpeech.isSpeaking();
             if (activity.activeUtterances <= 0 || !stillSpeaking) {
                 activity.activeUtterances = 0;
@@ -673,11 +708,17 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     static class SpeakTask implements Runnable {
         private final MainActivity activity;
         private final String text;
+        private final String utteranceId;
         private final long sessionId;
 
         public SpeakTask(MainActivity activity, String text, long sessionId) {
+            this(activity, text, "shadow_speech_" + System.currentTimeMillis(), sessionId);
+        }
+
+        public SpeakTask(MainActivity activity, String text, String utteranceId, long sessionId) {
             this.activity = activity;
             this.text = text;
+            this.utteranceId = utteranceId != null && !utteranceId.isEmpty() ? utteranceId : "shadow_speech_" + System.currentTimeMillis();
             this.sessionId = sessionId;
         }
 
@@ -716,17 +757,15 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                         activity.lastSpokenSentence = activity.lastSpokenSentence + " " + clean;
                     }
                     activity.activeUtterances++;
-                    activity.isNativeSpeaking = true;
-                    activity.notifyNativeSpeechState(true);
                     if (activity.wakeWordEngine != null) {
                         activity.wakeWordEngine.setInterruptionOnlyMode(true);
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         Bundle ttsParams = new Bundle();
                         ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.90f);
-                        activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, ttsParams, "shadow_speech_" + System.currentTimeMillis());
+                        activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, ttsParams, this.utteranceId);
                     } else {
-                        activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, null, "shadow_speech_" + System.currentTimeMillis());
+                        activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, null, this.utteranceId);
                     }
                 }
             }
@@ -1322,8 +1361,12 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     }
 
     public void speak(final String text) {
+        speak(text, "shadow_speech_" + System.currentTimeMillis());
+    }
+
+    public void speak(final String text, final String utteranceId) {
         final long currentSession = this.speechSessionId;
-        mainHandler.post(new SpeakTask(this, text, currentSession));
+        mainHandler.post(new SpeakTask(this, text, utteranceId, currentSession));
     }
 
     @Override

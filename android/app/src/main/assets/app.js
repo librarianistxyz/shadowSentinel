@@ -168,12 +168,14 @@ const VISEMES = {
 var speechTimeline = [];
 var speechStartTime = 0;
 var isSpeaking = false;
+var isWaitingForNativeAudioStart = false;
+var currentUtteranceId = null;
 var speechEndCallback = null;
 
 function textToVisemes(text) {
   var words = text.toLowerCase().split(/\s+/);
   var timeline = [];
-  var speedFactor = 0.82; // Faster 1.18x speech synchronization
+  var speedFactor = 1.02; // Aligned with native Android TTS speech rate 0.98x
   
   for (var w = 0; w < words.length; w++) {
     var word = words[w].replace(/[^a-z]/g, '');
@@ -235,6 +237,14 @@ function textToVisemes(text) {
 function updateSpeechTimeline(now) {
   if (!isSpeaking || speechTimeline.length === 0) return;
   
+  if (isWaitingForNativeAudioStart) {
+    // Keep lips parted gently in conversational readiness while hardware audio buffer fills
+    mouthTarget.openness = 0.05;
+    mouthTarget.smile = 0.05;
+    mouthTarget.teethVisible = 0.0;
+    return;
+  }
+
   var elapsed = now - speechStartTime;
   var accumulated = 0;
   var currentToken = null;
@@ -256,15 +266,23 @@ function updateSpeechTimeline(now) {
     mouthTarget.teethVisible = v.teethVisible;
     mouthTarget.smile = v.smile;
   } else {
-    isSpeaking = false;
-    speechTimeline = [];
-    mouthTarget.openness = 0.0;
-    mouthTarget.teethVisible = 0.0;
-    lastAiSpeechFinishedTime = Date.now();
-    if (typeof speechEndCallback === 'function') {
-      var cb = speechEndCallback;
-      speechEndCallback = null;
-      cb();
+    // If native Android TTS is still producing sound, maintain subtle living mouth presence rather than snapping shut
+    if (isNativeSpeaking) {
+      var breathPhase = Math.sin(now * 0.012);
+      mouthTarget.openness = 0.08 + 0.05 * breathPhase;
+      mouthTarget.teethVisible = 0.15;
+      mouthTarget.widthRatio = 1.05;
+    } else {
+      isSpeaking = false;
+      speechTimeline = [];
+      mouthTarget.openness = 0.0;
+      mouthTarget.teethVisible = 0.0;
+      lastAiSpeechFinishedTime = Date.now();
+      if (typeof speechEndCallback === 'function') {
+        var cb = speechEndCallback;
+        speechEndCallback = null;
+        cb();
+      }
     }
   }
 }
@@ -1287,7 +1305,7 @@ function resetWakeFollowUpTimer() {
   maintainActiveConversation();
 }
 
-// Bridge callback from Android Native TTS
+// Bridge callbacks from Android Native TTS
 window.onNativeSpeechState = function(speaking) {
   isNativeSpeaking = speaking;
   if (speaking) {
@@ -1303,9 +1321,37 @@ window.onNativeSpeechState = function(speaking) {
   }
 };
 
+// Exact hardware audio start callback from UtteranceProgressListener.onStart
+window.onNativeSpeechUtteranceStart = function(utteranceId) {
+  console.log('[TTS AUDIO BEGUN]: Hardware audio rendering started for:', utteranceId);
+  isWaitingForNativeAudioStart = false;
+  isSpeaking = true;
+  speechStartTime = performance.now();
+};
+
+// Exact hardware audio complete callback from UtteranceProgressListener.onDone
+window.onNativeSpeechUtteranceDone = function(utteranceId) {
+  console.log('[TTS AUDIO FINISHED]: Hardware audio finished for:', utteranceId);
+  isWaitingForNativeAudioStart = false;
+  if (!isProcessingQueue) {
+    isSpeaking = false;
+    speechTimeline = [];
+    mouthTarget.openness = 0.0;
+    mouthTarget.teethVisible = 0.0;
+  }
+  lastAiSpeechFinishedTime = Date.now();
+  if (typeof speechEndCallback === 'function') {
+    var cb = speechEndCallback;
+    speechEndCallback = null;
+    cb();
+  }
+};
+
 // Stop speaking immediately (Barge-in / User Tap Interruption)
 function stopSpeaking() {
   isSpeaking = false;
+  isWaitingForNativeAudioStart = false;
+  currentUtteranceId = null;
   speechTimeline = [];
   clauseQueue = [];
   isProcessingQueue = false;
@@ -2039,16 +2085,29 @@ window.ShadowMouth = {
   speak: function(text, onComplete) {
     if (!text || typeof text !== 'string') return;
     speechTimeline = textToVisemes(text);
-    speechStartTime = performance.now();
-    isSpeaking = true;
     speechEndCallback = onComplete || null;
+    currentUtteranceId = 'utt_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     
     // 1. Android Native TTS (if running inside APK)
     if (window.ShadowNative && typeof window.ShadowNative.speakNative === 'function') {
-      window.ShadowNative.speakNative(text);
+      isWaitingForNativeAudioStart = true;
+      isSpeaking = true;
+      speechStartTime = 0; // Starts synchronously when UtteranceProgressListener.onStart fires
+      try {
+        if (window.ShadowNative.speakNative.length >= 2) {
+          window.ShadowNative.speakNative(text, currentUtteranceId);
+        } else {
+          window.ShadowNative.speakNative(text);
+        }
+      } catch (e) {
+        window.ShadowNative.speakNative(text);
+      }
     } 
     // 2. Web Speech API fallback
     else if ('speechSynthesis' in window) {
+      isWaitingForNativeAudioStart = false;
+      isSpeaking = true;
+      speechStartTime = performance.now();
       try {
         window.speechSynthesis.cancel();
         var utter = new SpeechSynthesisUtterance(text);
@@ -2212,19 +2271,14 @@ window.ShadowMouth = {
       return;
     }
 
-    // 2. Acoustic Shield: Block recognition within 75ms of assistant finishing speech
-    if (now - lastAiSpeechFinishedTime < 75) {
-      console.log('[SPEECH BLOCKED]: Acoustic echo within 75ms of TTS finish discarded (' + (now - lastAiSpeechFinishedTime) + 'ms)');
-      return;
-    }
-
-    // 3. Acoustic Shield: Discard recognition matching Shadow's own recent spoken text (speaker feedback echo)
-    if (lastAssistantSpokenText) {
+    // 2. Acoustic Shield: Discard recognition matching Shadow's own recent spoken text ONLY within 500ms of TTS finishing
+    var timeSinceAiSpeech = now - lastAiSpeechFinishedTime;
+    if (timeSinceAiSpeech < 500 && lastAssistantSpokenText) {
       var normSpoken = speechText.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
       var normLast = lastAssistantSpokenText.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
       if (normSpoken && normLast) {
         if (normLast.indexOf(normSpoken) !== -1 || normSpoken.indexOf(normLast) !== -1) {
-          console.log('[SPEECH BLOCKED]: Acoustic echo matched last spoken text:', speechText);
+          console.log('[SPEECH BLOCKED]: Acoustic echo within ' + timeSinceAiSpeech + 'ms matched last spoken text:', speechText);
           return;
         }
         var sWords = normSpoken.split(/\s+/);
@@ -2241,6 +2295,8 @@ window.ShadowMouth = {
           }
         }
       }
+    } else if (timeSinceAiSpeech >= 500) {
+      lastAssistantSpokenText = "";
     }
 
     // Reject acoustic residue within 500ms of an interruption

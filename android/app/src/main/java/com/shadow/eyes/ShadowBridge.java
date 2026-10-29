@@ -19,7 +19,14 @@ public class ShadowBridge {
     @JavascriptInterface
     public void speakNative(String text) {
         if (activity != null) {
-            activity.speak(text);
+            activity.speak(text, "shadow_speech_" + System.currentTimeMillis());
+        }
+    }
+
+    @JavascriptInterface
+    public void speakNative(String text, String utteranceId) {
+        if (activity != null) {
+            activity.speak(text, utteranceId != null && !utteranceId.isEmpty() ? utteranceId : "shadow_speech_" + System.currentTimeMillis());
         }
     }
 

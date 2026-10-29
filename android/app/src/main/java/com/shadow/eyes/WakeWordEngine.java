@@ -61,6 +61,19 @@ public class WakeWordEngine {
         this.startListeningTask = new StartListeningTask(this);
 
         initRecognizerIntent();
+        muteSystemBeeps();
+    }
+
+    public void muteSystemBeeps() {
+        try {
+            AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                am.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0);
+                am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not silence STREAM_SYSTEM: " + e.getMessage());
+        }
     }
 
     private void initRecognizerIntent() {
@@ -71,18 +84,19 @@ public class WakeWordEngine {
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.getPackageName());
         recognizerIntent.putExtra("android.speech.extra.DICTATION_MODE", true);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 10000L);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L);
-        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_MINIMUM_LENGTH_MILLIS", 10000L);
-        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", 1500L);
-        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", 1500L);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15000L);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 650L);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 650L);
+        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_MINIMUM_LENGTH_MILLIS", 15000L);
+        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", 650L);
+        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", 650L);
     }
 
     public synchronized void start() {
         if (isRunning) return;
         isRunning = true;
         isPaused = false;
+        muteSystemBeeps();
         Log.i(TAG, "Starting on-device Voice Engine (direct speech listening without wake-word)...");
         mainHandler.post(new StartListeningTask(this));
     }
@@ -141,8 +155,8 @@ public class WakeWordEngine {
             mainHandler.removeCallbacks(pendingClearInterruptionTask);
         }
         pendingClearInterruptionTask = new ClearInterruptionModeTask(this);
-        mainHandler.postDelayed(pendingClearInterruptionTask, 60);
-        Log.d(TAG, "TTS finished reported. Interruption shield active for 60ms acoustic decay.");
+        mainHandler.postDelayed(pendingClearInterruptionTask, 300);
+        Log.d(TAG, "TTS finished reported. Interruption shield active for 300ms acoustic decay.");
     }
 
     public boolean isInterruptionOnlyMode() {
@@ -167,6 +181,7 @@ public class WakeWordEngine {
     void startListeningInternal() {
         if (!isRunning || isPaused) return;
 
+        muteSystemBeeps();
         try {
             if (speechRecognizer == null) {
                 if (SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -373,17 +388,18 @@ public class WakeWordEngine {
             if (engine.listener != null) {
                 engine.listener.onListeningStateChanged(false);
             }
+            engine.muteSystemBeeps();
 
             // Normal silence timeouts (6) and no-match (7) smoothly restart
             if (error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_NO_MATCH) {
-                engine.scheduleRestart(100);
+                engine.scheduleRestart(60);
             } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT || error == 13) {
-                engine.scheduleResetAndRestart(400);
+                engine.scheduleResetAndRestart(250);
             } else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                 Log.e(TAG, "SpeechRecognizer missing RECORD_AUDIO permission!");
             } else {
                 Log.d(TAG, "SpeechRecognizer status code: " + error);
-                engine.scheduleRestart(150);
+                engine.scheduleRestart(80);
             }
         }
 
@@ -408,6 +424,11 @@ public class WakeWordEngine {
             WakeWordEngine engine = engineRef.get();
             if (engine == null || !engine.isRunning || engine.isPaused) return;
 
+            engine.isListening = false;
+            if (engine.listener != null) {
+                engine.listener.onListeningStateChanged(false);
+            }
+
             ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches != null && !matches.isEmpty()) {
                 for (String text : matches) {
@@ -418,7 +439,7 @@ public class WakeWordEngine {
                 }
 
                 long timeSinceTts = System.currentTimeMillis() - engine.lastTtsEndTime;
-                if (engine.isInterruptionOnlyMode || timeSinceTts < 60) {
+                if (engine.isInterruptionOnlyMode || timeSinceTts < 300) {
                     Log.d(TAG, "Acoustic echo shield: Discarded recognition within " + timeSinceTts + "ms of TTS finish or during speech (" + matches.get(0) + ")");
                 } else {
                     String best = matches.get(0).trim();
