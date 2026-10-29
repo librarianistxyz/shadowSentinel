@@ -152,6 +152,21 @@ public class ShadowBridge {
     }
 
     @JavascriptInterface
+    public void notifyTtsFinished() {
+        if (activity != null) {
+            activity.activeUtterances = 0;
+            activity.isNativeSpeaking = false;
+            activity.lastTtsEndTime = System.currentTimeMillis();
+            activity.notifyNativeSpeechState(false);
+            activity.abandonMusicDucking();
+            if (activity.wakeWordEngine != null) {
+                activity.wakeWordEngine.notifyTtsFinished();
+                activity.wakeWordEngine.resume();
+            }
+        }
+    }
+
+    @JavascriptInterface
     public String getSystemStatus() {
         return "ONLINE - AMOLED 0-NIT SENTINEL ACTIVE";
     }

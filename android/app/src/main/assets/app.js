@@ -453,12 +453,13 @@ function triggerBlink() {
 }
 
 // ==============================================================================
-// SENTINEL LOCKDOWN SLUMBER & EMOTIONAL TEARY EYE SYSTEM
+// SENTINEL PERMANENT AWAKE SURVEILLANCE & EMOTIONAL TEARY EYE SYSTEM
+// Shadow NEVER goes to sleep or dims out: stays 100% awake and vigilant 24/7
 // ==============================================================================
-const SENTINEL_LOCKDOWN_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes of complete silence
+const SENTINEL_LOCKDOWN_TIMEOUT_MS = Infinity; // Sleep completely disabled
 var lastActivityTimestamp = performance.now();
-var isSentinelLockdown = false;
-var slumberProgress = 0.0; // 0.0 (alert awake) to 1.0 (deep faint slumber)
+var isSentinelLockdown = false; // Permanently awake
+var slumberProgress = 0.0; // 0.0 = alert, wide awake, zero slumber
 var isPanicMode = false; // Instant Hardware Panic Switch: 0-nit stealth blackout
 
 // ==============================================================================
@@ -524,19 +525,9 @@ function render(now) {
     resizeCanvas();
   }
 
-  // 10-Minute Sentinel Lockdown Slumber Check
-  if (!isSentinelLockdown && (now - lastActivityTimestamp > SENTINEL_LOCKDOWN_TIMEOUT_MS)) {
-    if (typeof enterSilentSentinelMode === 'function') {
-      enterSilentSentinelMode();
-    } else {
-      isSentinelLockdown = true;
-    }
-  }
-
-  // Smooth Slumber Interpolation (slow gentle descent, rapid alert wake)
-  var targetSlumber = isSentinelLockdown ? 1.0 : 0.0;
-  var slumberSpeed = isSentinelLockdown ? 0.012 : 0.08;
-  slumberProgress += (targetSlumber - slumberProgress) * slumberSpeed;
+  // Permanent Sentinel Vigilance: Never sleep, never dim into slumber
+  isSentinelLockdown = false;
+  slumberProgress = 0.0;
 
   // Smooth Emotional Tear Level Interpolation
   var emoSpeed = 0.04;
@@ -1298,21 +1289,11 @@ var WAKE_STATE_AWAKE = 'AWAKE';        // Active conversation mode (stays alert 
 var currentWakeState = WAKE_STATE_AWAKE; // Awake and alert on launch
 
 function enterSilentSentinelMode() {
-  isSentinelLockdown = true;
-  currentWakeState = WAKE_STATE_ASLEEP;
-  console.log('[SENTINEL LOCKDOWN] 10 minutes elapsed without user speech. Entering faint, dimmed slumber mode.');
-  mouthTarget.openness = 0.0;
-  mouthTarget.smile = 0.04;
-  mouthTarget.teethVisible = 0.0;
-  pauseMicrophone();
-  if (window.ShadowNative) {
-    if (typeof window.ShadowNative.setFollowUpMode === 'function') {
-      window.ShadowNative.setFollowUpMode(false);
-    }
-    if (typeof window.ShadowNative.resumeWakeWord === 'function') {
-      window.ShadowNative.resumeWakeWord();
-    }
-  }
+  // Permanent vigilance: Never sleep, never dim, never pause mic
+  isSentinelLockdown = false;
+  currentWakeState = WAKE_STATE_AWAKE;
+  console.log('[SENTINEL] Continuous 24/7 vigilance active. Watching and listening in milliseconds.');
+  resumeMicrophone(10);
 }
 
 function maintainActiveConversation() {
@@ -1332,15 +1313,14 @@ function resetWakeFollowUpTimer() {
 window.onNativeSpeechState = function(speaking) {
   isNativeSpeaking = speaking;
   if (speaking) {
-    pauseMicrophone();
+    // Hardware speech active - audio ducking engaged
   } else {
+    isSpeaking = false;
+    isProcessingQueue = false;
+    isAwaitingResponse = false;
     lastAiSpeechFinishedTime = Date.now();
-    if (!isSentinelLockdown) {
-      maintainActiveConversation();
-    }
-    if (!isProcessingQueue && !isSpeaking) {
-      resumeMicrophone(50);
-    }
+    maintainActiveConversation();
+    resumeMicrophone(10); // Immediately resume listening in 10 milliseconds!
   }
 };
 
@@ -1368,6 +1348,7 @@ window.onNativeSpeechUtteranceDone = function(utteranceId) {
     speechEndCallback = null;
     cb();
   }
+  resumeMicrophone(10); // Listen in milliseconds
 };
 
 // Stop speaking immediately (Barge-in / User Tap Interruption)
@@ -1478,6 +1459,10 @@ function sanitizeSpeechText(text) {
   }
 
   var clean = text.replace(/\[\[[A-Z_]+(?::[^\]]*)?\]\]/gi, '').trim();
+  // Strip stage directions like *whispering*, [whispering], (softly)
+  clean = clean.replace(/\*[^*]*\*/g, '');
+  clean = clean.replace(/\[[^\]]*\]/g, '');
+  clean = clean.replace(/\([^)]*\)/g, '');
   // Strip robotic "Hello Shadow" or canned filler ("it's lovely to help you with that")
   clean = clean.replace(/^(?:hey|hi|hello)\s+shadow\b[!,.]?\s*/i, '');
   clean = clean.replace(/^(?:it's\s+|its\s+)?lovely\s+to\s+(?:help\s+you(?:\s+with\s+that)?|hear\s+from\s+you|meet\s+you)[!,.]?\s*/i, '');
@@ -1512,10 +1497,7 @@ function processNextClause() {
   if (clauseQueue.length === 0) {
     isProcessingQueue = false;
     lastAiSpeechFinishedTime = Date.now();
-    var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
-    if (!isNativeSpeaking && !nativeActive) {
-      resumeMicrophone(50);
-    }
+    resumeMicrophone(10); // Immediately resume listening in 10ms
     return;
   }
   isProcessingQueue = true;
@@ -1562,7 +1544,6 @@ async function streamConversation(userPrompt) {
   if (!userPrompt || !userPrompt.trim()) return;
   
   markUserActivity();
-  pauseMicrophone();
   isAwaitingResponse = true;
   isThinkingActive = true; // Cognitive State: Eyelids squint into calculating slits; pupils drift subtly upward
 
@@ -1636,8 +1617,7 @@ async function streamConversation(userPrompt) {
   }
   currentStreamAbortController = new AbortController();
   if (/^(?:sentinel\s+)?(?:enter\s+)?(?:lockdown|slumber|slumber\s+mode|sleep\s+mode|go\s+to\s+sleep)[.!?]?$/i.test(cleanPrompt)) {
-    enterSilentSentinelMode();
-    var sleepReply = "Sentinel lockdown engaged. Entering slumber.";
+    var sleepReply = "I remain on continuous sentinel watch, never sleeping.";
     conversationHistory.push({ role: 'user', content: userPrompt });
     conversationHistory.push({ role: 'assistant', content: sleepReply });
     enqueueSpeechClause(sleepReply);
@@ -1970,35 +1950,32 @@ function commitUserSpeech() {
 }
 
 function pauseMicrophone() {
-  recognitionDesired = false;
+  // Never kill speech recognition or mute microphone: keep watching and listening in milliseconds
+  activeTranscript = '';
   if (speechDebounceTimer) {
     clearTimeout(speechDebounceTimer);
     speechDebounceTimer = null;
   }
-  activeTranscript = '';
-  destroySpeechRecognition();
 }
 
 function resumeMicrophone(delayMs) {
+  var delay = delayMs !== undefined ? delayMs : 10;
   if (window.ShadowNative) {
     if (typeof window.ShadowNative.resumeWakeWord === 'function') {
-      window.ShadowNative.resumeWakeWord();
+      setTimeout(function() {
+        try { window.ShadowNative.resumeWakeWord(); } catch(e) {}
+      }, delay);
     }
     return;
   }
   recognitionDesired = true;
-  var delay = delayMs !== undefined ? delayMs : 50;
   setTimeout(function() {
-    if (!recognitionDesired) return;
-    if (isSpeaking || isProcessingQueue || isNativeSpeaking || isAwaitingResponse) {
-      return;
-    }
     startMicrophone();
   }, delay);
 }
 
 window.resumeListening = function() {
-  resumeMicrophone(50);
+  resumeMicrophone(10);
 };
 
 function startMicrophone() {
@@ -2206,14 +2183,19 @@ async function playNeuralSpeechWithFallback(text, utteranceId, onComplete) {
 
       audio.onended = function() {
         console.log('[NEURAL TTS]: Playback complete');
-        if (window.ShadowNative && typeof window.ShadowNative.abandonMusicDucking === 'function') {
+        if (window.ShadowNative && typeof window.ShadowNative.notifyTtsFinished === 'function') {
+          window.ShadowNative.notifyTtsFinished();
+        } else if (window.ShadowNative && typeof window.ShadowNative.abandonMusicDucking === 'function') {
           window.ShadowNative.abandonMusicDucking();
         }
         URL.revokeObjectURL(audioUrl);
         activeNeuralAudio = null;
         isSpeaking = false;
+        isProcessingQueue = false;
+        isAwaitingResponse = false;
         window.onNativeSpeechState(false);
         lastAiSpeechFinishedTime = Date.now();
+        resumeMicrophone(10);
         if (typeof onComplete === 'function') onComplete();
       };
 
@@ -2388,15 +2370,22 @@ window.ShadowMouth = {
     var now = Date.now();
     var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
 
-    // 1. Acoustic Shield: Block recognition if Shadow is actively speaking or processing a speech queue
-    if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive || isAwaitingResponse) {
-      console.log('[SPEECH BLOCKED]: Discarded recognition while Shadow is speaking or awaiting response');
-      return;
+    // 1. Acoustic Shield: Block recognition ONLY if Shadow is actively producing hardware speech audio
+    if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive) {
+      // Auto-recovery watchdog: if flagged as speaking but no native audio is active and cooldown has passed, force clear
+      if (!nativeActive && (now - lastAiSpeechFinishedTime > 1500)) {
+        isSpeaking = false;
+        isProcessingQueue = false;
+        isNativeSpeaking = false;
+      } else {
+        console.log('[SPEECH BLOCKED]: Discarded recognition while Shadow is speaking');
+        return;
+      }
     }
 
-    // 2. Acoustic Shield: Discard recognition matching Shadow's own recent spoken text ONLY within 500ms of TTS finishing
+    // 2. Acoustic Shield: Discard recognition matching Shadow's own recent spoken text ONLY within 100ms of TTS finishing
     var timeSinceAiSpeech = now - lastAiSpeechFinishedTime;
-    if (timeSinceAiSpeech < 500 && lastAssistantSpokenText) {
+    if (timeSinceAiSpeech < 100 && lastAssistantSpokenText) {
       var normSpoken = speechText.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
       var normLast = lastAssistantSpokenText.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
       if (normSpoken && normLast) {
@@ -2418,13 +2407,13 @@ window.ShadowMouth = {
           }
         }
       }
-    } else if (timeSinceAiSpeech >= 500) {
+    } else if (timeSinceAiSpeech >= 100) {
       lastAssistantSpokenText = "";
     }
 
-    // Reject acoustic residue within 500ms of an interruption
-    if (now - lastInterruptionTime < 500) {
-      console.log('[SPEECH BLOCKED]: Acoustic residue within 500ms of interruption discarded');
+    // Reject acoustic residue within 200ms of an interruption
+    if (now - lastInterruptionTime < 200) {
+      console.log('[SPEECH BLOCKED]: Acoustic residue within 200ms of interruption discarded');
       return;
     }
 
@@ -2439,7 +2428,6 @@ window.ShadowMouth = {
     if (EMOTIONAL_TRIGGERS_REGEX && EMOTIONAL_TRIGGERS_REGEX.test(speechText)) {
       triggerEmotionalTears(1.0, 50000);
     }
-    pauseMicrophone();
     streamConversation(speechText.trim());
   },
 
@@ -2576,5 +2564,23 @@ document.addEventListener('DOMContentLoaded', function() {
   requestScreenLock();
   initContinuousListening();
 });
+
+// Active Continuous Conversational Watchdog:
+// Guarantees microphone is NEVER muted and Shadow NEVER gets stuck waiting
+setInterval(function() {
+  var now = Date.now();
+  if (isAwaitingResponse && (now - lastActivityTimestamp > 5000)) {
+    isAwaitingResponse = false;
+    isThinkingActive = false;
+    resumeMicrophone(10);
+  }
+  var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
+  if ((isSpeaking || isNativeSpeaking) && !nativeActive && (now - lastAiSpeechFinishedTime > 3000)) {
+    isSpeaking = false;
+    isNativeSpeaking = false;
+    isProcessingQueue = false;
+    resumeMicrophone(10);
+  }
+}, 1200);
 
 requestAnimationFrame(render);

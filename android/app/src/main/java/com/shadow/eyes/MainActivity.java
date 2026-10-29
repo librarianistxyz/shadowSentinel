@@ -160,8 +160,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             }
 
             long timeSinceTts = now - activity.lastTtsEndTime;
-            // Acoustic shield: If TTS just finished speaking within 500ms, suppress acoustic echo
-            if (timeSinceTts < 500 && activity.lastSpokenSentence != null && !activity.lastSpokenSentence.isEmpty()) {
+            // Acoustic shield: If TTS just finished speaking within 100ms, suppress acoustic echo
+            if (timeSinceTts < 100 && activity.lastSpokenSentence != null && !activity.lastSpokenSentence.isEmpty()) {
                 String cleanRecognized = speechText.replaceAll("[^a-zA-Z0-9 ]", "").toLowerCase(java.util.Locale.ROOT).trim();
                 String cleanSpoken = activity.lastSpokenSentence.replaceAll("[^a-zA-Z0-9 ]", "").toLowerCase(java.util.Locale.ROOT).trim();
                 if (!cleanRecognized.isEmpty() && !cleanSpoken.isEmpty()) {
@@ -183,7 +183,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                         }
                     }
                 }
-            } else if (timeSinceTts >= 500) {
+            } else if (timeSinceTts >= 100) {
                 // Clear spoken sentence once acoustic reflection window has passed
                 activity.lastSpokenSentence = "";
             }
@@ -548,6 +548,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 requestPermissions(REQUIRED_PERMISSIONS, PERMISSION_REQ_CODE);
             }
         }
+
+        // Active Voice Watchdog: Ensures microphone and speech flags NEVER get stuck
+        mainHandler.postDelayed(new TtsWatchdogTask(this), 1000);
     }
 
     private static java.lang.ref.WeakReference<MainActivity> instanceRef;
@@ -1062,6 +1065,32 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         }
     }
 
+    static class TtsWatchdogTask implements Runnable {
+        private final java.lang.ref.WeakReference<MainActivity> activityRef;
+        public TtsWatchdogTask(MainActivity activity) {
+            this.activityRef = new java.lang.ref.WeakReference<>(activity);
+        }
+        @Override
+        public void run() {
+            MainActivity activity = activityRef.get();
+            if (activity == null) return;
+            boolean ttsHardwareSpeaking = activity.textToSpeech != null && activity.textToSpeech.isSpeaking();
+            if (!ttsHardwareSpeaking && activity.isNativeSpeaking) {
+                android.util.Log.d("ShadowEyes", "[WATCHDOG] Force clearing stuck isNativeSpeaking");
+                activity.activeUtterances = 0;
+                activity.isNativeSpeaking = false;
+                activity.lastTtsEndTime = System.currentTimeMillis();
+                activity.notifyNativeSpeechState(false);
+                activity.abandonMusicDucking();
+                if (activity.wakeWordEngine != null) {
+                    activity.wakeWordEngine.notifyTtsFinished();
+                    activity.wakeWordEngine.resume();
+                }
+            }
+            activity.mainHandler.postDelayed(this, 1000);
+        }
+    }
+
     static class SpeakTask implements Runnable {
         private final MainActivity activity;
         private final String text;
@@ -1081,6 +1110,10 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
 
         private static String smoothenText(String raw) {
             if (raw == null) return "";
+            // Strip stage directions like *whispering*, [whispering], (softly) so they are never spoken
+            raw = raw.replaceAll("(?i)\\*[^*]*\\*", "")
+                     .replaceAll("(?i)\\[[^\\]]*\\]", "")
+                     .replaceAll("(?i)\\([^)]*\\)", "");
             return raw.trim()
                 .replaceAll("(?i)^(?:(?:hey|hi|hello)\\s+(?:shadow|there)?|hello[!,.]?|hi[!,.]?|hey[!,.]?)\\s*", "")
                 .replaceAll("(?i)^(?:hello[!,.]?\\s*)?(?:it'?s\\s+)?lovely\\s+to\\s+(?:help\\s+you(?:\\s+with\\s+that)?|hear\\s+from\\s+you|meet\\s+you)[!,.]?\\s*", "")
