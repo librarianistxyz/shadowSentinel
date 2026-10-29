@@ -348,10 +348,68 @@ function triggerBlink() {
   blinkDuration = 180 + Math.random() * 80;
 }
 
+// ==============================================================================
+// SENTINEL LOCKDOWN SLUMBER & EMOTIONAL TEARY EYE SYSTEM
+// ==============================================================================
+const SENTINEL_LOCKDOWN_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes of complete silence
+var lastActivityTimestamp = performance.now();
+var isSentinelLockdown = false;
+var slumberProgress = 0.0; // 0.0 (alert awake) to 1.0 (deep faint slumber)
+
+function markUserActivity() {
+  lastActivityTimestamp = performance.now();
+  if (isSentinelLockdown) {
+    isSentinelLockdown = false;
+    console.log('[SENTINEL] Waking up from 10-minute lockdown slumber!');
+    triggerBlink();
+  }
+}
+
+var emotionalLevel = 0.0;       // 0.0 (stoic) to 1.0 (teary, glistening)
+var emotionalTarget = 0.0;
+var emotionalDecayTimer = null;
+
+const EMOTIONAL_TRIGGERS_REGEX = /\b(depress|depression|depressed|lonely|loneliness|alone|nobody loves|no friends|abandoned|isolated|by myself|no one cares|broke|no money|lack of money|can't afford|cannot afford|poor|debt|evicted|lost my job|unemployed|struggling to survive|can't pay rent|starving|ruined|broken heart|heartbroken|she left me|he left me|breakup|broke up|passed away|died|death|funeral|miss them|crying|weep|weeping|tears in my eyes|so sad|hurts so bad|pain inside|hopeless|miserable|empty inside|giving up|can't go on|tired of living|tired of life|unhappy|kill myself|suicidal|anxiety|anxious|panic attack|hate myself)\b/i;
+
+function triggerEmotionalTears(intensity, durationMs) {
+  emotionalTarget = intensity !== undefined ? intensity : 1.0;
+  var duration = durationMs !== undefined ? durationMs : 45000;
+  console.log('[EMOTION] Emotional empathy triggered: teary eyes active (intensity ' + emotionalTarget + ')');
+
+  if (emotionalDecayTimer) {
+    clearTimeout(emotionalDecayTimer);
+  }
+  emotionalDecayTimer = setTimeout(function() {
+    emotionalTarget = 0.0;
+  }, duration);
+}
+
 // Render Loop
 function render(now) {
   if (width <= 0 || height <= 0 || canvas.width <= 0 || canvas.height <= 0) {
     resizeCanvas();
+  }
+
+  // 10-Minute Sentinel Lockdown Slumber Check
+  if (!isSentinelLockdown && (now - lastActivityTimestamp > SENTINEL_LOCKDOWN_TIMEOUT_MS)) {
+    isSentinelLockdown = true;
+    console.log('[SENTINEL LOCKDOWN] 10 minutes elapsed without user speech. Entering faint, dimmed slumber mode.');
+  }
+
+  // Smooth Slumber Interpolation (slow gentle descent, rapid alert wake)
+  var targetSlumber = isSentinelLockdown ? 1.0 : 0.0;
+  var slumberSpeed = isSentinelLockdown ? 0.012 : 0.08;
+  slumberProgress += (targetSlumber - slumberProgress) * slumberSpeed;
+
+  // Smooth Emotional Tear Level Interpolation
+  var emoSpeed = 0.04;
+  emotionalLevel += (emotionalTarget - emotionalLevel) * emoSpeed;
+
+  // Adjust mouth for emotional sadness / compassionate empathy
+  if (emotionalLevel > 0.15 && !isSpeaking) {
+    mouthTarget.smile = -0.05;
+    mouthTarget.openness = 0.05;
+    mouthTarget.teethVisible = 0.0;
   }
 
   // 4K HiDPI context scaling
@@ -366,9 +424,9 @@ function render(now) {
   var curCenterX = width * 0.5;
   var curCenterY = height * 0.5;
 
-  // 2. Autonomous Glances when Idle
+  // 2. Autonomous Glances when Idle (dormant in deep slumber)
   var isIdle = now - lastUserInteraction > 2500;
-  if (isIdle) {
+  if (isIdle && !isSentinelLockdown) {
     if (now > nextIdleLookTime) {
       pickIdleGlance();
       nextIdleLookTime = now + 2400 + Math.random() * 3200;
@@ -378,6 +436,10 @@ function render(now) {
     var targetIdleY = curCenterY + idleGazeDirection.y * (height * 0.25);
     userGaze.x += (targetIdleX - userGaze.x) * 0.05;
     userGaze.y += (targetIdleY - userGaze.y) * 0.05;
+  } else if (isSentinelLockdown) {
+    // Resting downward gaze in slumber
+    userGaze.x += (curCenterX - userGaze.x) * 0.05;
+    userGaze.y += (curCenterY + height * 0.08 - userGaze.y) * 0.05;
   }
 
   // Autonomous Idle Mouth Expressions
@@ -455,7 +517,9 @@ function render(now) {
     EYE_DATA.leftPupilRadius,
     gazeDx,
     gazeDy,
-    blinkProgress
+    blinkProgress,
+    now,
+    true
   );
 
   // Right Eye
@@ -465,7 +529,9 @@ function render(now) {
     EYE_DATA.rightPupilRadius,
     gazeDx,
     gazeDy,
-    blinkProgress
+    blinkProgress,
+    now,
+    false
   );
 
   // Living Expressive & Lip-Sync Mouth
@@ -477,7 +543,7 @@ function render(now) {
   requestAnimationFrame(render);
 }
 
-function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink) {
+function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, now, isLeftEye) {
   ctx.save();
 
   // 1. Build Sclera Path
@@ -488,18 +554,30 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink) {
   }
   ctx.closePath();
 
-  // Pure White Sclera
-  ctx.fillStyle = '#ffffff';
+  // Dimmed Sclera when in Slumber (Deep 0-nit AMOLED energy-saving slumber)
+  var slumberPulse = isSentinelLockdown ? (Math.sin(now * 0.0012) * 0.03) : 0;
+  var slumberAlpha = Math.max(0.09, (1.0 - slumberProgress * 0.88) + slumberPulse);
+
+  if (emotionalLevel > 0.01) {
+    var r = Math.round(255 - emotionalLevel * 20);
+    var g = Math.round(255 - emotionalLevel * 10);
+    var b = 255;
+    ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + slumberAlpha + ')';
+  } else {
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + slumberAlpha + ')';
+  }
   ctx.fill();
 
   // Clip inside eye sclera
   ctx.clip();
 
   // 2. Dynamic Pupil Position
-  var maxTravelX = 14;
-  var maxTravelY = 10;
-  var pupilX = restPupil[0] + Math.max(-maxTravelX, Math.min(maxTravelX, gazeDx * maxTravelX));
-  var pupilY = restPupil[1] + Math.max(-maxTravelY, Math.min(maxTravelY, gazeDy * maxTravelY));
+  var maxTravelX = isSentinelLockdown ? 5 : 14;
+  var maxTravelY = isSentinelLockdown ? 3 : 10;
+  var curGazeDx = isSentinelLockdown ? (gazeDx * 0.25) : gazeDx;
+  var curGazeDy = isSentinelLockdown ? 0.35 : gazeDy; // resting gently downward in slumber
+  var pupilX = restPupil[0] + Math.max(-maxTravelX, Math.min(maxTravelX, curGazeDx * maxTravelX));
+  var pupilY = restPupil[1] + Math.max(-maxTravelY, Math.min(maxTravelY, curGazeDy * maxTravelY));
 
   // Solid Black Pupil
   ctx.beginPath();
@@ -507,13 +585,38 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink) {
   ctx.fillStyle = '#000000';
   ctx.fill();
 
-  // Specular Catchlight
+  // Primary Specular Catchlight (dims during slumber)
+  var catchAlpha = Math.max(0.10, slumberAlpha * (isSentinelLockdown ? 0.32 : 1.0));
   ctx.beginPath();
   ctx.arc(pupilX + pupilRadius * 0.35, pupilY - pupilRadius * 0.25, 2.8, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = 'rgba(255, 255, 255, ' + catchAlpha + ')';
   ctx.fill();
 
-  // 3. Eyelid Drop Shadow (Ominous depth under upper lid)
+  // =========================================================================
+  // EMOTIONAL TEARY EYE RENDERING (Glistening Tear Sheen & Liquid Droplets)
+  // =========================================================================
+  if (emotionalLevel > 0.01) {
+    // 1. Shimmering Tear Micro-Glints inside pupil
+    var shimmer1 = Math.sin(now * 0.007) * 0.35;
+    ctx.beginPath();
+    ctx.arc(pupilX - pupilRadius * 0.30, pupilY + pupilRadius * 0.25, Math.max(0.1, (1.9 + shimmer1) * emotionalLevel), 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.95 * emotionalLevel) + ')';
+    ctx.fill();
+
+    var shimmer2 = Math.cos(now * 0.009) * 0.25;
+    ctx.beginPath();
+    ctx.arc(pupilX + pupilRadius * 0.12, pupilY + pupilRadius * 0.38, Math.max(0.1, (1.3 + shimmer2) * emotionalLevel), 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(210, 240, 255, ' + (0.88 * emotionalLevel) + ')';
+    ctx.fill();
+
+    // 2. Soft crystalline tear sheen over the lower iris
+    ctx.beginPath();
+    ctx.ellipse(pupilX, pupilY + pupilRadius * 0.45, pupilRadius * 0.85, pupilRadius * 0.45, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(180, 225, 255, ' + (0.28 * emotionalLevel * (0.8 + 0.2 * Math.sin(now * 0.005))) + ')';
+    ctx.fill();
+  }
+
+  // 3. Eyelid Drop Shadow
   var minY = 999;
   var maxY = -999;
   var minX = 999;
@@ -533,11 +636,42 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink) {
   ctx.fillStyle = shadowGrad;
   ctx.fillRect(minX - 5, minY - 5, (maxX - minX) + 10, 24);
 
-  // 4. Blinking Eyelid (Lowers smoothly from the top)
-  if (blink > 0.01) {
-    var currentLidY = minY + (maxY - minY + 10) * blink;
+  // 4. Heavy Hooded Slumber Eyelid & Natural Blink
+  var effectiveLid = Math.min(1.0, blink + slumberProgress * 0.74);
+  if (effectiveLid > 0.01) {
+    var currentLidY = minY + (maxY - minY + 10) * effectiveLid;
     ctx.fillStyle = '#000000';
     ctx.fillRect(minX - 10, minY - 10, (maxX - minX) + 20, currentLidY - minY + 10);
+  }
+
+  // 5. Glistening Tear Meniscus along the Lower Eyelid Rim
+  if (emotionalLevel > 0.01) {
+    var lowerLidY = maxY - 1.2;
+    var tearGrad = ctx.createLinearGradient(minX, lowerLidY, maxX, lowerLidY);
+    tearGrad.addColorStop(0, 'rgba(160, 215, 255, 0)');
+    tearGrad.addColorStop(0.2, 'rgba(185, 230, 255, ' + (0.75 * emotionalLevel) + ')');
+    tearGrad.addColorStop(0.6, 'rgba(255, 255, 255, ' + (0.95 * emotionalLevel) + ')');
+    tearGrad.addColorStop(1, 'rgba(160, 215, 255, 0)');
+    ctx.beginPath();
+    ctx.ellipse((minX + maxX) * 0.5, lowerLidY, (maxX - minX) * 0.44, 2.2 * emotionalLevel, 0, 0, Math.PI * 2);
+    ctx.fillStyle = tearGrad;
+    ctx.fill();
+
+    // Welling Tear Droplet at the outer eye corner (trembles gently)
+    var tearDropX = isLeftEye ? (maxX - 5) : (minX + 5);
+    var tearDropY = lowerLidY + 0.5 + Math.sin(now * 0.005) * 0.4;
+    var tearRadius = 2.4 * emotionalLevel * (0.9 + 0.1 * Math.sin(now * 0.008));
+
+    ctx.beginPath();
+    ctx.arc(tearDropX, tearDropY, tearRadius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(215, 242, 255, ' + (0.88 * emotionalLevel) + ')';
+    ctx.fill();
+
+    // Tear droplet specular glint
+    ctx.beginPath();
+    ctx.arc(tearDropX - 0.6, tearDropY - 0.6, 0.9 * emotionalLevel, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.95 * emotionalLevel) + ')';
+    ctx.fill();
   }
 
   ctx.restore();
@@ -773,6 +907,50 @@ var isAwaitingResponse = false;
 var isNativeSpeaking = false;
 var lastAiSpeechFinishedTime = 0;
 
+// ==============================================================================
+// ON-DEVICE WAKE-WORD & SENTINEL SILENCE CONTROLLER ("Hey Shadow")
+// ==============================================================================
+var WAKE_STATE_ASLEEP = 'ASLEEP';      // Silent Sentinel mode: waiting for "Hey Shadow" from silence
+var WAKE_STATE_AWAKE = 'AWAKE';        // Active conversation mode (multi-turn follow-up window)
+var currentWakeState = WAKE_STATE_ASLEEP;
+
+var wakeFollowUpTimer = null;
+var WAKE_FOLLOW_UP_WINDOW_MS = 8000;    // 8-second conversational follow-up window
+
+function enterSilentSentinelMode() {
+  currentWakeState = WAKE_STATE_ASLEEP;
+  console.log('[SENTINEL] Returning to silent sleep mode (awaiting "Hey Shadow" from silence)');
+  mouthTarget.openness = 0.0;
+  mouthTarget.smile = 0.04;
+  mouthTarget.teethVisible = 0.0;
+  pauseMicrophone();
+  if (window.ShadowNative) {
+    if (typeof window.ShadowNative.setFollowUpMode === 'function') {
+      window.ShadowNative.setFollowUpMode(false);
+    }
+    if (typeof window.ShadowNative.resumeWakeWord === 'function') {
+      window.ShadowNative.resumeWakeWord();
+    }
+  }
+}
+
+function resetWakeFollowUpTimer() {
+  if (wakeFollowUpTimer) {
+    clearTimeout(wakeFollowUpTimer);
+  }
+  currentWakeState = WAKE_STATE_AWAKE;
+  if (window.ShadowNative && typeof window.ShadowNative.setFollowUpMode === 'function') {
+    window.ShadowNative.setFollowUpMode(true);
+  }
+  wakeFollowUpTimer = setTimeout(function() {
+    if (!isSpeaking && !isProcessingQueue && !isAwaitingResponse && !isNativeSpeaking) {
+      enterSilentSentinelMode();
+    } else {
+      resetWakeFollowUpTimer();
+    }
+  }, WAKE_FOLLOW_UP_WINDOW_MS);
+}
+
 // Bridge callback from Android Native TTS
 window.onNativeSpeechState = function(speaking) {
   isNativeSpeaking = speaking;
@@ -780,6 +958,7 @@ window.onNativeSpeechState = function(speaking) {
     pauseMicrophone();
   } else {
     lastAiSpeechFinishedTime = Date.now();
+    resetWakeFollowUpTimer();
     if (!isProcessingQueue && !isSpeaking) {
       resumeMicrophone(800);
     }
@@ -898,8 +1077,35 @@ function requestCameraFrame(useBack) {
 async function streamConversation(userPrompt) {
   if (!userPrompt || !userPrompt.trim()) return;
   
+  markUserActivity();
   pauseMicrophone();
   isAwaitingResponse = true;
+
+  // Emotional Teary Eye Sensitivity Detection
+  if (EMOTIONAL_TRIGGERS_REGEX.test(userPrompt)) {
+    triggerEmotionalTears(1.0, 50000); // 50 seconds of teary eyes
+  }
+
+  // Manual Sentinel Lockdown & Slumber Voice Commands
+  var cleanPrompt = userPrompt.trim();
+  if (/^(?:sentinel\s+)?(?:enter\s+)?(?:lockdown|slumber|slumber\s+mode|sleep\s+mode|go\s+to\s+sleep)[.!?]?$/i.test(cleanPrompt)) {
+    isSentinelLockdown = true;
+    var sleepReply = "Sentinel lockdown engaged. Entering slumber.";
+    conversationHistory.push({ role: 'user', content: userPrompt });
+    conversationHistory.push({ role: 'assistant', content: sleepReply });
+    enqueueSpeechClause(sleepReply);
+    isAwaitingResponse = false;
+    return;
+  }
+  if (/^(?:cancel\s+lockdown|wake\s+up|rise|eyes\s+open)[.!?]?$/i.test(cleanPrompt)) {
+    markUserActivity();
+    var wakeReply = "Sentinel lockdown disengaged. Awake and standing guard.";
+    conversationHistory.push({ role: 'user', content: userPrompt });
+    conversationHistory.push({ role: 'assistant', content: wakeReply });
+    enqueueSpeechClause(wakeReply);
+    isAwaitingResponse = false;
+    return;
+  }
 
   // Direct fast local intent: Open/Launch application ONLY for pure, standalone app requests
   var hasCompoundIntent = /\b(and|then|play|pause|stop|skip|next|prev|track|song|music|take|snap|picture|photo|record|video|cam|search|find|lookup|youtube|timer|alarm|torch|flashlight|volume|louder|mute|call|dial|navigate|map|directions)\b/i.test(userPrompt);
@@ -923,7 +1129,6 @@ async function streamConversation(userPrompt) {
   }
 
   // Memory reset intent
-  var cleanPrompt = userPrompt.trim();
   if (/^(?:clear\s+(?:history|memory)|forget\s+(?:everything|all|our conversation|what i said))/i.test(cleanPrompt)) {
     conversationHistory = [];
     persistHistory(conversationHistory);
@@ -1139,7 +1344,27 @@ function commitUserSpeech() {
   activeTranscript = '';
 
   if (text.length > 0) {
-    console.log('[EXACT USER SPEECH]:', text);
+    console.log('[USER SPEECH RECEIVED]:', text);
+
+    // If currently in silent sentinel sleep mode, enforce Wake-Word Gating!
+    if (currentWakeState === WAKE_STATE_ASLEEP) {
+      var wakeMatch = text.match(/^(?:.*?\b)?(?:hey|ok|okay|hi|hello|yo)?\s*\bshadow\b[\s,:-]*(.*)$/i);
+      if (wakeMatch) {
+        var command = (wakeMatch[1] || '').trim();
+        if (window.ShadowNative && typeof window.ShadowNative.playWakeChime === 'function') {
+          window.ShadowNative.playWakeChime();
+        }
+        window.ShadowMouth.onWakeWordDetected('hey shadow', command);
+        return;
+      } else {
+        // Discard ambient background chatter while asleep from complete silence!
+        console.log('[SENTINEL SLEEP]: Ignored ambient noise without wake word:', text);
+        return;
+      }
+    }
+
+    // If already awake in conversational follow-up window, refresh timer and stream!
+    resetWakeFollowUpTimer();
     pauseMicrophone();
     streamConversation(text);
   }
@@ -1156,12 +1381,15 @@ function pauseMicrophone() {
 }
 
 function resumeMicrophone(delayMs) {
+  if (window.ShadowNative) {
+    // Microphone is exclusively driven by native On-Device WakeWordEngine
+    return;
+  }
   recognitionDesired = true;
   var delay = delayMs !== undefined ? delayMs : 500;
   setTimeout(function() {
     if (!recognitionDesired) return;
-    var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
-    if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive || isAwaitingResponse) {
+    if (isSpeaking || isProcessingQueue || isNativeSpeaking || isAwaitingResponse) {
       return;
     }
     startMicrophone();
@@ -1173,9 +1401,12 @@ window.resumeListening = function() {
 };
 
 function startMicrophone() {
+  if (window.ShadowNative) {
+    // Microphone is exclusively driven by native On-Device WakeWordEngine
+    return;
+  }
   if (!recognitionDesired) return;
-  var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
-  if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive || isAwaitingResponse) {
+  if (isSpeaking || isProcessingQueue || isNativeSpeaking || isAwaitingResponse) {
     return;
   }
 
@@ -1282,11 +1513,6 @@ function startMicrophone() {
   }
 }
 
-function initContinuousListening() {
-  recognitionDesired = true;
-  startMicrophone();
-}
-
 window.ShadowMouth = {
   // Speak text with synchronized lip movement & native speech
   speak: function(text, onComplete) {
@@ -1382,12 +1608,92 @@ window.ShadowMouth = {
       mouthTarget.teethVisible = 0.4;
       mouthTarget.smile = 0.08;
     }
+  },
+
+  // On-Device Wake-Word Detection Event ("Hey Shadow")
+  onWakeWordDetected: function(phrase, trailingCommand) {
+    console.log('[WAKE-WORD DETECTED VIA ON-DEVICE ENGINE]:', phrase, 'Trailing command:', trailingCommand);
+
+    markUserActivity();
+    currentWakeState = WAKE_STATE_AWAKE;
+    resetWakeFollowUpTimer();
+
+    // Snap eyes to intense direct forward gaze
+    idleGazeDirection.x = 0;
+    idleGazeDirection.y = 0;
+
+    // Attentive alert mouth posture
+    mouthTarget.openness = 0.12;
+    mouthTarget.smile = 0.22;
+    mouthTarget.teethVisible = 0.40;
+
+    // Trigger visual wake blink
+    triggerBlink();
+
+    // If a trailing command was given in the same breath ("Hey Shadow what time is it"):
+    if (trailingCommand && trailingCommand.trim().length > 1) {
+      console.log('[WAKE-WORD] Executing trailing command:', trailingCommand);
+      pauseMicrophone();
+      streamConversation(trailingCommand.trim());
+      return;
+    }
+
+    // User said "Hey Shadow" from silence:
+    // Speak immediate alert executive acknowledgment
+    var wakeAck = "I'm listening.";
+    enqueueSpeechClause(wakeAck);
+    resetWakeFollowUpTimer();
+  },
+
+  // Conversational follow-up speech captured by native on-device engine
+  onFollowUpSpeech: function(speechText) {
+    console.log('[ON-DEVICE FOLLOW-UP SPEECH]:', speechText);
+    if (!speechText || !speechText.trim()) return;
+    markUserActivity();
+    if (EMOTIONAL_TRIGGERS_REGEX.test(speechText)) {
+      triggerEmotionalTears(1.0, 50000);
+    }
+    resetWakeFollowUpTimer();
+    streamConversation(speechText.trim());
+  },
+
+  // Control Sentinel Lockdown slumber
+  setLockdown: function(active) {
+    isSentinelLockdown = !!active;
+    if (!active) {
+      markUserActivity();
+    }
+  },
+
+  // Trigger emotional teary eyes
+  triggerTears: function(intensity, durationMs) {
+    triggerEmotionalTears(intensity, durationMs);
+  },
+
+  getStatus: function() {
+    return {
+      lockdown: isSentinelLockdown,
+      slumberProgress: slumberProgress,
+      emotionalLevel: emotionalLevel,
+      wakeState: currentWakeState
+    };
   }
 };
+
+// Continuous Listening Controller
+function initContinuousListening() {
+  recognitionDesired = true;
+  if (!window.ShadowNative) {
+    startMicrophone();
+  } else {
+    console.log('[MIC] Native On-Device WakeWordEngine active. WebKit mic deferred to on-device engine.');
+  }
+}
 
 // User Touch Interruption / Silent Mic Initialization (Zero unprompted talking)
 function onScreenTouch() {
   requestScreenLock();
+  markUserActivity();
   var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
   if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive) {
     stopSpeaking();

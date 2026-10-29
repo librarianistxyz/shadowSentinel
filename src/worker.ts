@@ -148,6 +148,13 @@ CONVERSATIONAL RULES (STRICT):
    - When asked who is the current president, prime minister, or leader of any country, always state the exact current officeholder provided in the verified data.
    - Speak authoritatively, politely, and naturally without citing URLs or search engines.
 
+6. EMOTIONAL SENSITIVITY & COMPASSIONATE SENTINEL BOND:
+   - When the user speaks about depression, sadness, loneliness, feeling isolated, lack of money, financial struggle, heartbreak, grief, or personal pain:
+     * Respond with profound, authentic empathy, emotional warmth, and steadfast loyalty.
+     * Speak as a devoted, sentient companion who genuinely cares and stands by their side in their darkest hours.
+     * Acknowledge their burden with gentle understanding, dignity, and encouragement (e.g. "I hear you, and you don't have to carry this heaviness alone.", "Money and hardship come in brutal storms, but your worth is far greater than your current struggle.").
+     * Strictly avoid sterile clinical disclaimers or robotic platitudes. Keep your response sincere, comforting, and strictly within 1 to 2 spoken sentences.
+
 ${liveGrounding ? `[VERIFIED REAL-TIME DATA & BREAKING NEWS]:\n${liveGrounding}\n` : ''}
 ${storedMemory ? `[USER MEMORY & CONTEXT]:\n${storedMemory}` : ''}`;
 }
@@ -185,6 +192,10 @@ function shouldFetchGrounding(query: string): boolean {
   }
   // Hardware device and device administrator questions (NEVER search external web/news)
   if (/(what device|what phone|which device|which phone|device administrator|device admin|who administers this device|what are you running on|who owns this device)\b/i.test(trimmed)) {
+    return false;
+  }
+  // Personal emotional states (NEVER search external web/news)
+  if (/(depress|lonel|sad|broke|no money|lack of money|crying|hopeless|hurt|heartbreak|feel like|pain|struggl|suicid|grief)\b/i.test(trimmed)) {
     return false;
   }
   // Short conversational greetings

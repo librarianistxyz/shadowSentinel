@@ -79,6 +79,42 @@ public class ShadowBridge {
     }
 
     @JavascriptInterface
+    public boolean isWakeWordActive() {
+        if (activity != null && activity.wakeWordEngine != null) {
+            return activity.wakeWordEngine.isListening();
+        }
+        return false;
+    }
+
+    @JavascriptInterface
+    public void pauseWakeWord() {
+        if (activity != null && activity.wakeWordEngine != null) {
+            activity.wakeWordEngine.pause();
+        }
+    }
+
+    @JavascriptInterface
+    public void resumeWakeWord() {
+        if (activity != null && activity.wakeWordEngine != null) {
+            activity.wakeWordEngine.resume();
+        }
+    }
+
+    @JavascriptInterface
+    public void setFollowUpMode(boolean active) {
+        if (activity != null && activity.wakeWordEngine != null) {
+            activity.wakeWordEngine.setFollowUpMode(active);
+        }
+    }
+
+    @JavascriptInterface
+    public void playWakeChime() {
+        if (activity != null && activity.wakeWordEngine != null) {
+            activity.wakeWordEngine.playWakeChime();
+        }
+    }
+
+    @JavascriptInterface
     public String getSystemStatus() {
         return "ONLINE - AMOLED 0-NIT SENTINEL ACTIVE";
     }
