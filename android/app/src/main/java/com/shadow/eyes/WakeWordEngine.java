@@ -37,6 +37,7 @@ public class WakeWordEngine {
 
     private SpeechRecognizer speechRecognizer;
     private Intent recognizerIntent;
+    private final StartListeningTask startListeningTask;
 
     private volatile boolean isRunning = false;
     private volatile boolean isPaused = false;
@@ -57,6 +58,7 @@ public class WakeWordEngine {
         this.context = context.getApplicationContext();
         this.mainHandler = new Handler(Looper.getMainLooper());
         this.listener = listener;
+        this.startListeningTask = new StartListeningTask(this);
 
         initRecognizerIntent();
     }
@@ -68,6 +70,13 @@ public class WakeWordEngine {
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.getPackageName());
+        recognizerIntent.putExtra("android.speech.extra.DICTATION_MODE", true);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 10000L);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L);
+        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_MINIMUM_LENGTH_MILLIS", 10000L);
+        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", 1500L);
+        recognizerIntent.putExtra("android.speech.extras.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", 1500L);
     }
 
     public synchronized void start() {
@@ -97,7 +106,8 @@ public class WakeWordEngine {
         if (!isRunning || !isPaused) return;
         isPaused = false;
         Log.d(TAG, "Resuming Voice Engine");
-        mainHandler.postDelayed(new StartListeningTask(this), 200);
+        mainHandler.removeCallbacks(startListeningTask);
+        mainHandler.postDelayed(startListeningTask, 50);
     }
 
     public void setFollowUpMode(boolean active) {
@@ -118,7 +128,8 @@ public class WakeWordEngine {
         if (active) {
             if (isRunning && isPaused) {
                 isPaused = false;
-                mainHandler.postDelayed(new StartListeningTask(this), 150);
+                mainHandler.removeCallbacks(startListeningTask);
+                mainHandler.postDelayed(startListeningTask, 50);
             }
         }
     }
@@ -130,8 +141,8 @@ public class WakeWordEngine {
             mainHandler.removeCallbacks(pendingClearInterruptionTask);
         }
         pendingClearInterruptionTask = new ClearInterruptionModeTask(this);
-        mainHandler.postDelayed(pendingClearInterruptionTask, 800);
-        Log.d(TAG, "TTS finished reported. Interruption shield active for 800ms acoustic decay.");
+        mainHandler.postDelayed(pendingClearInterruptionTask, 60);
+        Log.d(TAG, "TTS finished reported. Interruption shield active for 60ms acoustic decay.");
     }
 
     public boolean isInterruptionOnlyMode() {
@@ -165,17 +176,15 @@ public class WakeWordEngine {
                     Log.e(TAG, "SpeechRecognizer is NOT available on this device!");
                     return;
                 }
-            } else {
-                try {
-                    speechRecognizer.cancel();
-                } catch (Exception ignored) {}
+            } else if (isListening) {
+                return;
             }
 
             speechRecognizer.startListening(recognizerIntent);
             Log.d(TAG, "Voice input active - listening for user commands/questions");
         } catch (Exception e) {
             Log.e(TAG, "startListening error", e);
-            scheduleResetAndRestart(500);
+            scheduleResetAndRestart(400);
         }
     }
 
@@ -207,15 +216,15 @@ public class WakeWordEngine {
 
     void scheduleRestart(long delayMs) {
         if (!isRunning || isPaused) return;
-        mainHandler.removeCallbacksAndMessages(null);
-        mainHandler.postDelayed(new StartListeningTask(this), delayMs);
+        mainHandler.removeCallbacks(startListeningTask);
+        mainHandler.postDelayed(startListeningTask, delayMs);
     }
 
     void scheduleResetAndRestart(long delayMs) {
         if (!isRunning || isPaused) return;
-        mainHandler.removeCallbacksAndMessages(null);
+        mainHandler.removeCallbacks(startListeningTask);
         mainHandler.post(new StopListeningTask(this));
-        mainHandler.postDelayed(new StartListeningTask(this), delayMs);
+        mainHandler.postDelayed(startListeningTask, delayMs);
     }
 
     void handleSpeechRecognizedInternal(String speechText) {
@@ -242,7 +251,7 @@ public class WakeWordEngine {
         if (listener != null) {
             listener.onInterruptionRequested();
         }
-        scheduleRestart(800);
+        scheduleRestart(100);
     }
 
     // =========================================================================
@@ -363,14 +372,14 @@ public class WakeWordEngine {
 
             // Normal silence timeouts (6) and no-match (7) smoothly restart
             if (error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_NO_MATCH) {
-                engine.scheduleRestart(250);
+                engine.scheduleRestart(100);
             } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT || error == 13) {
-                engine.scheduleResetAndRestart(600);
+                engine.scheduleResetAndRestart(400);
             } else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                 Log.e(TAG, "SpeechRecognizer missing RECORD_AUDIO permission!");
             } else {
                 Log.d(TAG, "SpeechRecognizer status code: " + error);
-                engine.scheduleRestart(350);
+                engine.scheduleRestart(150);
             }
         }
 
@@ -405,7 +414,7 @@ public class WakeWordEngine {
                 }
 
                 long timeSinceTts = System.currentTimeMillis() - engine.lastTtsEndTime;
-                if (engine.isInterruptionOnlyMode || timeSinceTts < 800) {
+                if (engine.isInterruptionOnlyMode || timeSinceTts < 60) {
                     Log.d(TAG, "Acoustic echo shield: Discarded recognition within " + timeSinceTts + "ms of TTS finish or during speech (" + matches.get(0) + ")");
                 } else {
                     String best = matches.get(0).trim();
@@ -415,7 +424,7 @@ public class WakeWordEngine {
                 }
             }
 
-            engine.scheduleRestart(150);
+            engine.scheduleRestart(50);
         }
 
         @Override

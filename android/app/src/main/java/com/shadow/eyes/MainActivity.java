@@ -110,8 +110,8 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                 return;
             }
 
-            if (now - activity.lastTtsEndTime < 850) {
-                android.util.Log.i("ShadowEyes", "Acoustic shield: Dropped speech recognized within 850ms cooldown ("
+            if (now - activity.lastTtsEndTime < 75) {
+                android.util.Log.i("ShadowEyes", "Acoustic shield: Dropped speech recognized within 75ms cooldown ("
                         + (now - activity.lastTtsEndTime) + "ms): '" + speechText + "'");
                 return;
             }
@@ -768,7 +768,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             if (activity.wakeWordEngine != null) {
                 activity.wakeWordEngine.setInterruptionOnlyMode(false);
                 activity.wakeWordEngine.pause();
-                activity.mainHandler.postDelayed(new ResumeWakeWordTask(activity.wakeWordEngine), 600);
+                activity.mainHandler.postDelayed(new ResumeWakeWordTask(activity.wakeWordEngine), 80);
             }
             // Subtle 35ms haptic confirmation
             try {

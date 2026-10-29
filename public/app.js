@@ -1011,7 +1011,7 @@ window.onNativeSpeechState = function(speaking) {
       maintainActiveConversation();
     }
     if (!isProcessingQueue && !isSpeaking) {
-      resumeMicrophone(800);
+      resumeMicrophone(50);
     }
   }
 };
@@ -1047,7 +1047,7 @@ function stopSpeaking() {
   mouthTarget.cornerRightY = 0;
   mouthTarget.cornerLeftY = 0;
 
-  resumeMicrophone(400);
+  resumeMicrophone(50);
 }
 
 function hasUserCommandIntent(actionType, userPrompt) {
@@ -1147,7 +1147,7 @@ function processNextClause() {
     lastAiSpeechFinishedTime = Date.now();
     var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
     if (!isNativeSpeaking && !nativeActive) {
-      resumeMicrophone(800);
+      resumeMicrophone(50);
     }
     return;
   }
@@ -1374,7 +1374,7 @@ async function streamConversation(userPrompt) {
         conversationHistory.push({ role: 'assistant', content: fallback });
         persistHistory(conversationHistory);
       } else {
-        resumeMicrophone(500);
+        resumeMicrophone(50);
       }
       return;
     }
@@ -1389,7 +1389,7 @@ async function streamConversation(userPrompt) {
         conversationHistory.push({ role: 'assistant', content: reply });
         persistHistory(conversationHistory);
       } else {
-        resumeMicrophone(500);
+        resumeMicrophone(50);
       }
       return;
     }
@@ -1484,7 +1484,7 @@ async function streamConversation(userPrompt) {
       persistHistory(conversationHistory);
     } else {
       // Empty response safety fallback to prevent conversational deadlock
-      resumeMicrophone(500);
+      resumeMicrophone(50);
     }
     
   } catch (err) {
@@ -1499,7 +1499,7 @@ async function streamConversation(userPrompt) {
       conversationHistory.push({ role: 'assistant', content: errReply });
       persistHistory(conversationHistory);
     } else {
-      resumeMicrophone(500);
+      resumeMicrophone(50);
     }
   } finally {
     if (activeStreamReader) {
@@ -1595,7 +1595,7 @@ function resumeMicrophone(delayMs) {
     return;
   }
   recognitionDesired = true;
-  var delay = delayMs !== undefined ? delayMs : 500;
+  var delay = delayMs !== undefined ? delayMs : 50;
   setTimeout(function() {
     if (!recognitionDesired) return;
     if (isSpeaking || isProcessingQueue || isNativeSpeaking || isAwaitingResponse) {
@@ -1606,7 +1606,7 @@ function resumeMicrophone(delayMs) {
 }
 
 window.resumeListening = function() {
-  resumeMicrophone(200);
+  resumeMicrophone(50);
 };
 
 function startMicrophone() {
@@ -1647,7 +1647,7 @@ function startMicrophone() {
 
       // ACOUSTIC ECHO SHIELD:
       // If the phone is speaking or within cooldown, discard immediately
-      if (isSpeaking || isProcessingQueue || isNativeSpeaking || isTtsActive || isAwaitingResponse || (now - lastAiSpeechFinishedTime < 450)) {
+      if (isSpeaking || isProcessingQueue || isNativeSpeaking || isTtsActive || isAwaitingResponse || (now - lastAiSpeechFinishedTime < 75)) {
         activeTranscript = '';
         if (speechDebounceTimer) {
           clearTimeout(speechDebounceTimer);
@@ -1887,9 +1887,9 @@ window.ShadowMouth = {
       return;
     }
 
-    // 2. Acoustic Shield: Block recognition within 850ms of assistant finishing speech
-    if (now - lastAiSpeechFinishedTime < 850) {
-      console.log('[SPEECH BLOCKED]: Acoustic echo within 850ms of TTS finish discarded (' + (now - lastAiSpeechFinishedTime) + 'ms)');
+    // 2. Acoustic Shield: Block recognition within 75ms of assistant finishing speech
+    if (now - lastAiSpeechFinishedTime < 75) {
+      console.log('[SPEECH BLOCKED]: Acoustic echo within 75ms of TTS finish discarded (' + (now - lastAiSpeechFinishedTime) + 'ms)');
       return;
     }
 
