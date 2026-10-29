@@ -360,8 +360,14 @@ function markUserActivity() {
   lastActivityTimestamp = performance.now();
   if (isSentinelLockdown) {
     isSentinelLockdown = false;
+    if (typeof currentWakeState !== 'undefined') {
+      currentWakeState = 'AWAKE';
+    }
     console.log('[SENTINEL] Waking up from 10-minute lockdown slumber!');
     triggerBlink();
+    if (window.ShadowNative && typeof window.ShadowNative.setFollowUpMode === 'function') {
+      window.ShadowNative.setFollowUpMode(true);
+    }
   }
 }
 
@@ -392,8 +398,11 @@ function render(now) {
 
   // 10-Minute Sentinel Lockdown Slumber Check
   if (!isSentinelLockdown && (now - lastActivityTimestamp > SENTINEL_LOCKDOWN_TIMEOUT_MS)) {
-    isSentinelLockdown = true;
-    console.log('[SENTINEL LOCKDOWN] 10 minutes elapsed without user speech. Entering faint, dimmed slumber mode.');
+    if (typeof enterSilentSentinelMode === 'function') {
+      enterSilentSentinelMode();
+    } else {
+      isSentinelLockdown = true;
+    }
   }
 
   // Smooth Slumber Interpolation (slow gentle descent, rapid alert wake)
@@ -908,18 +917,16 @@ var isNativeSpeaking = false;
 var lastAiSpeechFinishedTime = 0;
 
 // ==============================================================================
-// ON-DEVICE WAKE-WORD & SENTINEL SILENCE CONTROLLER ("Hey Shadow")
+// ON-DEVICE WAKE-WORD & SENTINEL SILENCE CONTROLLER ("Hey Shadow", "Hey Hello", etc.)
 // ==============================================================================
-var WAKE_STATE_ASLEEP = 'ASLEEP';      // Silent Sentinel mode: waiting for "Hey Shadow" from silence
-var WAKE_STATE_AWAKE = 'AWAKE';        // Active conversation mode (multi-turn follow-up window)
-var currentWakeState = WAKE_STATE_ASLEEP;
-
-var wakeFollowUpTimer = null;
-var WAKE_FOLLOW_UP_WINDOW_MS = 8000;    // 8-second conversational follow-up window
+var WAKE_STATE_ASLEEP = 'ASLEEP';      // Silent Sentinel mode: waiting for wake/greeting from slumber
+var WAKE_STATE_AWAKE = 'AWAKE';        // Active conversation mode (stays alert for full 10-min conversational window)
+var currentWakeState = WAKE_STATE_AWAKE; // Awake and alert on launch
 
 function enterSilentSentinelMode() {
+  isSentinelLockdown = true;
   currentWakeState = WAKE_STATE_ASLEEP;
-  console.log('[SENTINEL] Returning to silent sleep mode (awaiting "Hey Shadow" from silence)');
+  console.log('[SENTINEL LOCKDOWN] 10 minutes elapsed without user speech. Entering faint, dimmed slumber mode.');
   mouthTarget.openness = 0.0;
   mouthTarget.smile = 0.04;
   mouthTarget.teethVisible = 0.0;
@@ -934,21 +941,17 @@ function enterSilentSentinelMode() {
   }
 }
 
-function resetWakeFollowUpTimer() {
-  if (wakeFollowUpTimer) {
-    clearTimeout(wakeFollowUpTimer);
-  }
+function maintainActiveConversation() {
+  markUserActivity();
   currentWakeState = WAKE_STATE_AWAKE;
   if (window.ShadowNative && typeof window.ShadowNative.setFollowUpMode === 'function') {
     window.ShadowNative.setFollowUpMode(true);
   }
-  wakeFollowUpTimer = setTimeout(function() {
-    if (!isSpeaking && !isProcessingQueue && !isAwaitingResponse && !isNativeSpeaking) {
-      enterSilentSentinelMode();
-    } else {
-      resetWakeFollowUpTimer();
-    }
-  }, WAKE_FOLLOW_UP_WINDOW_MS);
+}
+
+// Backward-compatible alias
+function resetWakeFollowUpTimer() {
+  maintainActiveConversation();
 }
 
 // Bridge callback from Android Native TTS
@@ -958,7 +961,9 @@ window.onNativeSpeechState = function(speaking) {
     pauseMicrophone();
   } else {
     lastAiSpeechFinishedTime = Date.now();
-    resetWakeFollowUpTimer();
+    if (!isSentinelLockdown) {
+      maintainActiveConversation();
+    }
     if (!isProcessingQueue && !isSpeaking) {
       resumeMicrophone(800);
     }
@@ -1089,7 +1094,7 @@ async function streamConversation(userPrompt) {
   // Manual Sentinel Lockdown & Slumber Voice Commands
   var cleanPrompt = userPrompt.trim();
   if (/^(?:sentinel\s+)?(?:enter\s+)?(?:lockdown|slumber|slumber\s+mode|sleep\s+mode|go\s+to\s+sleep)[.!?]?$/i.test(cleanPrompt)) {
-    isSentinelLockdown = true;
+    enterSilentSentinelMode();
     var sleepReply = "Sentinel lockdown engaged. Entering slumber.";
     conversationHistory.push({ role: 'user', content: userPrompt });
     conversationHistory.push({ role: 'assistant', content: sleepReply });
@@ -1098,7 +1103,7 @@ async function streamConversation(userPrompt) {
     return;
   }
   if (/^(?:cancel\s+lockdown|wake\s+up|rise|eyes\s+open)[.!?]?$/i.test(cleanPrompt)) {
-    markUserActivity();
+    maintainActiveConversation();
     var wakeReply = "Sentinel lockdown disengaged. Awake and standing guard.";
     conversationHistory.push({ role: 'user', content: userPrompt });
     conversationHistory.push({ role: 'assistant', content: wakeReply });
@@ -1382,7 +1387,9 @@ function pauseMicrophone() {
 
 function resumeMicrophone(delayMs) {
   if (window.ShadowNative) {
-    // Microphone is exclusively driven by native On-Device WakeWordEngine
+    if (typeof window.ShadowNative.resumeWakeWord === 'function') {
+      window.ShadowNative.resumeWakeWord();
+    }
     return;
   }
   recognitionDesired = true;
@@ -1610,13 +1617,11 @@ window.ShadowMouth = {
     }
   },
 
-  // On-Device Wake-Word Detection Event ("Hey Shadow")
+  // On-Device Wake-Word & Greeting Detection Event ("Hey Shadow", "Hey Hello", "Hello", etc.)
   onWakeWordDetected: function(phrase, trailingCommand) {
-    console.log('[WAKE-WORD DETECTED VIA ON-DEVICE ENGINE]:', phrase, 'Trailing command:', trailingCommand);
+    console.log('[WAKE-WORD / GREETING DETECTED]:', phrase, 'Trailing command:', trailingCommand);
 
-    markUserActivity();
-    currentWakeState = WAKE_STATE_AWAKE;
-    resetWakeFollowUpTimer();
+    maintainActiveConversation();
 
     // Snap eyes to intense direct forward gaze
     idleGazeDirection.x = 0;
@@ -1630,7 +1635,7 @@ window.ShadowMouth = {
     // Trigger visual wake blink
     triggerBlink();
 
-    // If a trailing command was given in the same breath ("Hey Shadow what time is it"):
+    // If a trailing command was given in the same breath ("Hey Shadow what time is it", "Hey hello who are you"):
     if (trailingCommand && trailingCommand.trim().length > 1) {
       console.log('[WAKE-WORD] Executing trailing command:', trailingCommand);
       pauseMicrophone();
@@ -1638,30 +1643,38 @@ window.ShadowMouth = {
       return;
     }
 
-    // User said "Hey Shadow" from silence:
-    // Speak immediate alert executive acknowledgment
+    // Direct greeting acknowledgment from silence
+    var cleanPhrase = (phrase || '').toLowerCase();
     var wakeAck = "I'm listening.";
+    if (cleanPhrase.indexOf('hello') !== -1 || cleanPhrase.indexOf('hi') !== -1 || cleanPhrase.indexOf('morning') !== -1 || cleanPhrase.indexOf('evening') !== -1 || cleanPhrase.indexOf('day') !== -1) {
+      wakeAck = "Hello! I'm here and listening.";
+    } else if (cleanPhrase.indexOf('wake') !== -1 || cleanPhrase.indexOf('awake') !== -1) {
+      wakeAck = "I'm awake and standing guard.";
+    } else if (cleanPhrase.indexOf('there') !== -1) {
+      wakeAck = "Yes, I'm right here.";
+    } else if (cleanPhrase.indexOf('what') !== -1) {
+      wakeAck = "All systems alert and listening.";
+    }
     enqueueSpeechClause(wakeAck);
-    resetWakeFollowUpTimer();
   },
 
   // Conversational follow-up speech captured by native on-device engine
   onFollowUpSpeech: function(speechText) {
     console.log('[ON-DEVICE FOLLOW-UP SPEECH]:', speechText);
     if (!speechText || !speechText.trim()) return;
-    markUserActivity();
+    maintainActiveConversation();
     if (EMOTIONAL_TRIGGERS_REGEX.test(speechText)) {
       triggerEmotionalTears(1.0, 50000);
     }
-    resetWakeFollowUpTimer();
     streamConversation(speechText.trim());
   },
 
   // Control Sentinel Lockdown slumber
   setLockdown: function(active) {
-    isSentinelLockdown = !!active;
-    if (!active) {
-      markUserActivity();
+    if (active) {
+      enterSilentSentinelMode();
+    } else {
+      maintainActiveConversation();
     }
   },
 
@@ -1693,13 +1706,19 @@ function initContinuousListening() {
 // User Touch Interruption / Silent Mic Initialization (Zero unprompted talking)
 function onScreenTouch() {
   requestScreenLock();
-  markUserActivity();
+  maintainActiveConversation();
   var nativeActive = window.ShadowNative && typeof window.ShadowNative.isSpeakingNative === 'function' && window.ShadowNative.isSpeakingNative();
   if (isSpeaking || isProcessingQueue || isNativeSpeaking || nativeActive) {
     stopSpeaking();
   } else {
-    recognitionDesired = true;
-    startMicrophone();
+    // Snap eyes to center
+    gazeDx = 0;
+    gazeDy = 0;
+    triggerBlink();
+    if (!window.ShadowNative) {
+      recognitionDesired = true;
+      startMicrophone();
+    }
   }
 }
 

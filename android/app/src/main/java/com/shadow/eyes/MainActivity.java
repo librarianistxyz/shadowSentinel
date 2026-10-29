@@ -265,6 +265,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
 
         if (hasAllPermissions()) {
             sentinelCamera.start();
+            wakeWordEngine.setFollowUpMode(true);
             wakeWordEngine.start();
         } else {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -371,6 +372,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             if (hasAllPermissions()) {
                 sentinelCamera.start();
                 if (wakeWordEngine != null) {
+                    wakeWordEngine.setFollowUpMode(true);
                     wakeWordEngine.start();
                 }
             }

@@ -56,14 +56,26 @@ public class WakeWordEngine {
     private volatile boolean isPaused = false;
     private volatile boolean isListening = false;
     private volatile boolean isTriggered = false;
-    private volatile boolean isFollowUpMode = false;
+    private volatile boolean isFollowUpMode = true; // Alert conversational state active by default
 
     private long lastWakeTriggerTime = 0;
     private static final long WAKE_COOLDOWN_MS = 1500;
 
-    // Pattern matching "Hey Shadow", "OK Shadow", "Shadow", "Hi Shadow", etc.
+    // Multi-trigger pattern: conversational greetings, wake commands, and name triggers
+    // Matches "hey hello", "hello", "hi", "hey", "wake up", "are you there", "good morning", "hey shadow", etc.
     private static final Pattern WAKE_WORD_PATTERN = Pattern.compile(
-        "\\b(?:hey|ok|okay|hi|hello|yo)?\\s*\\b(shadow|shadows|shado)\\b",
+        "^\\s*(?:" +
+        "(?:hey|ok|okay|hi|hello|yo)?\\s*(?:shadow|shadows|shado)\\b" +
+        "|hey\\s+hello\\b" +
+        "|hello(?:\\s+there)?\\b" +
+        "|hi(?:\\s+there)?\\b" +
+        "|hey(?:\\s+there)?\\b" +
+        "|wake\\s+up\\b" +
+        "|are\\s+you\\s+(?:there|awake)\\b" +
+        "|you\\s+there\\b" +
+        "|good\\s+(?:morning|afternoon|evening|day)\\b" +
+        "|what(?:'s|s)\\s+up\\b" +
+        ")",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -132,7 +144,7 @@ public class WakeWordEngine {
             return new WakeMatchResult(false, "", "");
         }
         String clean = input.toLowerCase()
-            .replaceAll("[^a-z0-9 ]", " ")
+            .replaceAll("[^a-z0-9' ]", " ")
             .replaceAll("\\s+", " ")
             .trim();
 
@@ -394,8 +406,13 @@ public class WakeWordEngine {
                 for (String text : matches) {
                     WakeMatchResult match = checkWakeWord(text);
                     if (match.matched) {
-                        engine.handleWakeWordInternal(match.phrase, match.trailingCommand);
-                        return;
+                        // When slumbering (!isFollowUpMode), trigger instant wake from partial match.
+                        // When alert and conversing (isFollowUpMode), wait for onResults so multi-word questions
+                        // starting with "hello..." or "wake up..." aren't prematurely interrupted.
+                        if (!engine.isFollowUpMode) {
+                            engine.handleWakeWordInternal(match.phrase, match.trailingCommand);
+                            return;
+                        }
                     }
                 }
             }
