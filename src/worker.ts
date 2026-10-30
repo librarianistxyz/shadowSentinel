@@ -1081,9 +1081,32 @@ export default {
           const isStream = (body as any).stream === true || request.headers.get('Accept')?.includes('text/event-stream');
           const normalizedMsg = userMessage.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 
-          // Natural Master Greeting (Zero Latency & Friendly Readiness)
-          if (/^(hi|hello|hey|hey shadow|hello shadow|good (morning|afternoon|evening|day)|greetings|sup|yo)(\s+there|\s+shadow)?$/i.test(normalizedMsg)) {
-            const reply = "Hello! Standing by for your commands.";
+          // Natural Master Greeting (Charismatic, Context-Aware & Varied Delivery)
+          if (/^(hi|hello|hey|hey shadow|hello shadow|good (morning|afternoon|evening|day|night)|greetings|sup|yo)(\s+there|\s+shadow)?[.!?]?$/i.test(normalizedMsg)) {
+            const isDark = !!body.deviceContext?.isDarkRoom || (body.deviceContext?.ambientLux !== undefined && Number(body.deviceContext.ambientLux) < 4.0);
+            const devAdmin = body.deviceContext?.deviceAdministrator || "librarianist";
+
+            let reply = "";
+            if (/good\s+morning/i.test(normalizedMsg)) {
+              reply = `Good morning ${devAdmin}. My sensors are awake and the glass is clear. How are you feeling today? [[EMOTION:warm]]`;
+            } else if (/good\s+afternoon/i.test(normalizedMsg)) {
+              reply = `Good afternoon ${devAdmin}. Hope your day is treating you well. What are we diving into today? [[EMOTION:smile]]`;
+            } else if (/good\s+(evening|night)/i.test(normalizedMsg)) {
+              reply = isDark
+                ? `Good evening. The room is quiet and the lights are low. What's on your mind tonight? [[EMOTION:thoughtful]]`
+                : `Good evening ${devAdmin}. Always good to have your company. How was your day? [[EMOTION:smile]]`;
+            } else if (isDark) {
+              reply = `Hello. It is quiet in here, but I am right beside you. How are you doing tonight? [[EMOTION:thoughtful]]`;
+            } else {
+              const greetings = [
+                `Hello ${devAdmin}. It's great to hear your voice. What's on your mind today? [[EMOTION:warm]]`,
+                `Hey there! I am right here with you. How are you doing today? [[EMOTION:smile]]`,
+                `Hello! My sensors are attentive and focused. What shall we work on together? [[EMOTION:curious]]`,
+                `Hey ${devAdmin}. Always a pleasure to see you. How is everything going with you? [[EMOTION:warm]]`
+              ];
+              reply = greetings[Math.floor(Date.now() / 1000) % greetings.length];
+            }
+
             if (isStream) {
               return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
                 headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
@@ -1178,7 +1201,13 @@ export default {
 
           // Conversational Follow-Up: Politeness & Appreciation
           if (/^(thank\s+you|thanks|thanks\s+shadow|thank\s+you\s+shadow|good\s+job|well\s+done|great\s+job|awesome|nice)$/i.test(normalizedMsg)) {
-            const reply = "Always at your service. Standing by for whatever you command next. [[EMOTION:smile]]";
+            const devAdmin = body.deviceContext?.deviceAdministrator || "librarianist";
+            const thanksList = [
+              `You are very welcome, ${devAdmin}. Always glad to be here with you. [[EMOTION:warm]]`,
+              `Anytime! We make a formidable team. Let me know what you need next. [[EMOTION:smile]]`,
+              `Much appreciated. It is an honor working alongside you. [[EMOTION:warm]]`
+            ];
+            const reply = thanksList[Math.floor(Date.now() / 1000) % thanksList.length];
             if (isStream) {
               return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
                 headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },

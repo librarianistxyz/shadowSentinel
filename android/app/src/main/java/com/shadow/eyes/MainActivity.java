@@ -578,6 +578,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         wakeWordEngine = new WakeWordEngine(this, new ShadowWakeWordListener(this));
 
         IntentFilter promptFilter = new IntentFilter("com.shadow.eyes.TEST_PROMPT");
+        promptFilter.addAction("com.shadow.eyes.PROMPT");
         promptFilter.addAction("com.shadow.eyes.INTERRUPT");
         registerReceiver(new PromptReceiver(this), promptFilter);
 
@@ -1157,7 +1158,6 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                      .replaceAll("(?i)\\[[^\\]]*\\]", "")
                      .replaceAll("(?i)\\([^)]*\\)", "");
             return raw.trim()
-                .replaceAll("(?i)^(?:(?:hey|hi|hello)\\s+(?:shadow|there)?|hello[!,.]?|hi[!,.]?|hey[!,.]?)\\s*", "")
                 .replaceAll("(?i)^(?:hello[!,.]?\\s*)?(?:it'?s\\s+)?lovely\\s+to\\s+(?:help\\s+you(?:\\s+with\\s+that)?|hear\\s+from\\s+you|meet\\s+you)[!,.]?\\s*", "")
                 .replaceAll("\\bAI\\b", "A.I.")
                 .replaceAll("\\bAPI\\b", "A.P.I.")
@@ -1236,6 +1236,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     } else {
                         activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, null, this.utteranceId);
                     }
+                    android.util.Log.i("ShadowEyes", "Speaking: \"" + clean + "\"");
                 }
             }
         }

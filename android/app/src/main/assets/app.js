@@ -1804,9 +1804,35 @@ async function streamConversation(userPrompt) {
     return;
   }
 
-  // Natural Master Greeting (Sub-10ms Instant Readiness)
-  if (/^(?:hi|hello|hey|hey shadow|hello shadow|good (?:morning|afternoon|evening|day)|greetings|sup|yo)(?:\s+there|\s+shadow)?[.!?]?$/i.test(cleanPrompt)) {
-    var greetReply = "Hello! Standing by for your commands.";
+  // Natural Master Greeting (Sub-10ms Instant Dynamic Readiness)
+  if (/^(?:hi|hello|hey|hey shadow|hello shadow|good (?:morning|afternoon|evening|day|night)|greetings|sup|yo)(?:\s+there|\s+shadow)?[.!?]?$/i.test(cleanPrompt)) {
+    var devAdmin = "librarianist";
+    try {
+      var d = getDeviceDiagnostics();
+      if (d && d.deviceAdministrator) devAdmin = d.deviceAdministrator;
+    } catch(e) {}
+
+    var greetReply = "";
+    if (/good\s+morning/i.test(cleanPrompt)) {
+      greetReply = "Good morning " + devAdmin + ". My sensors are awake and the glass is clear. How are you feeling today?";
+    } else if (/good\s+afternoon/i.test(cleanPrompt)) {
+      greetReply = "Good afternoon " + devAdmin + ". Hope your day is treating you well. What are we diving into today?";
+    } else if (/good\s+(?:evening|night)/i.test(cleanPrompt)) {
+      greetReply = isDarkRoom 
+        ? "Good evening. The room is quiet and the lights are low. What's on your mind tonight?"
+        : "Good evening " + devAdmin + ". Always great to have your company. How was your day?";
+    } else if (isDarkRoom) {
+      greetReply = "Hello. It is quiet in here, but I am right beside you. How are you doing tonight?";
+    } else {
+      var greets = [
+        "Hello " + devAdmin + ". It's great to hear your voice. What's on your mind today?",
+        "Hey there! I am right here with you. How are you doing today?",
+        "Hello! My sensors are attentive and focused. What shall we work on together?",
+        "Hey " + devAdmin + ". Always a pleasure to see you. How is everything going with you?"
+      ];
+      greetReply = greets[Math.floor(Date.now() / 1000) % greets.length];
+    }
+
     conversationHistory.push({ role: 'user', content: cleanPrompt });
     conversationHistory.push({ role: 'assistant', content: greetReply });
     persistHistory(conversationHistory);
@@ -1887,7 +1913,17 @@ async function streamConversation(userPrompt) {
 
   // Conversational Follow-Up: Politeness & Appreciation
   if (/^(?:thank\s+you|thanks|thanks\s+shadow|thank\s+you\s+shadow|good\s+job|well\s+done|great\s+job|awesome|nice)[.!?]?$/i.test(cleanPrompt)) {
-    var thanksReply = "Always at your service. Standing by for whatever you command next.";
+    var devAdminThx = "librarianist";
+    try {
+      var d = getDeviceDiagnostics();
+      if (d && d.deviceAdministrator) devAdminThx = d.deviceAdministrator;
+    } catch(e) {}
+    var thanksList = [
+      "You are very welcome, " + devAdminThx + ". Always glad to be here with you.",
+      "Anytime! We make a formidable team. Let me know what you need next.",
+      "Much appreciated. It is an honor working alongside you."
+    ];
+    var thanksReply = thanksList[Math.floor(Date.now() / 1000) % thanksList.length];
     conversationHistory.push({ role: 'user', content: cleanPrompt });
     conversationHistory.push({ role: 'assistant', content: thanksReply });
     persistHistory(conversationHistory);
