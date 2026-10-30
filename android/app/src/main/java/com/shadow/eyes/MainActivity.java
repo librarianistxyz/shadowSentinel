@@ -517,6 +517,11 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         @Override
         public void onReceive(Context context, Intent intent) {
             if (activity == null) return;
+            if ("com.shadow.eyes.SYNC_DIGEST".equals(intent.getAction())) {
+                android.util.Log.i("ShadowEyes", "Received SYNC_DIGEST broadcast - initiating immediate daily digest sync");
+                ShadowBrain.getInstance(activity).syncDailyDigestAsync(null, null);
+                return;
+            }
             if ("com.shadow.eyes.INTERRUPT".equals(intent.getAction()) || intent.getBooleanExtra("interrupt", false)) {
                 activity.handleAcousticInterruption();
                 return;
@@ -580,6 +585,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         IntentFilter promptFilter = new IntentFilter("com.shadow.eyes.TEST_PROMPT");
         promptFilter.addAction("com.shadow.eyes.PROMPT");
         promptFilter.addAction("com.shadow.eyes.INTERRUPT");
+        promptFilter.addAction("com.shadow.eyes.SYNC_DIGEST");
         registerReceiver(new PromptReceiver(this), promptFilter);
 
         if (hasAllPermissions()) {
@@ -597,6 +603,9 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
 
         // Sovereign AI Engine: Initialize on-device llama.cpp + Qwen2.5-0.5B-Instruct
         ShadowBrain.getInstance(this).initAsync(new ShadowBrainInitCallback(this));
+
+        // Sync Daily World Knowledge Digest from Cloudflare edge
+        ShadowBrain.getInstance(this).syncDailyDigestAsync(null, null);
     }
 
     static class BrainReadyUiTask implements Runnable {

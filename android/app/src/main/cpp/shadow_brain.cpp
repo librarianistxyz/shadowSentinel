@@ -20,16 +20,7 @@ static llama_sampler * g_sampler = nullptr;
 static std::atomic<bool> g_stop{false};
 static std::atomic<bool> g_is_generating{false};
 static int g_n_ctx = 2048;
-
-static void batch_set_tokens(llama_batch_ext * batch, const llama_token * tokens, int32_t n_tokens, llama_pos pos_0) {
-    llama_batch_ext_clear(batch);
-    for (int32_t i = 0; i < n_tokens; ++i) {
-        const int32_t idx = llama_batch_ext_add_token(batch, 0, tokens[i]);
-        const llama_pos pos = pos_0 + i;
-        llama_batch_ext_set_pos(batch, idx, &pos);
-    }
-    llama_batch_ext_set_output_logits(batch, n_tokens - 1, true);
-}
+static const int BATCH_SIZE = 512;
 
 static void release_internal() {
     if (g_batch) {
@@ -89,8 +80,8 @@ Java_com_shadow_eyes_ShadowBrain_nativeInit(
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = g_n_ctx;
-    ctx_params.n_batch = 512;
-    ctx_params.n_ubatch = 512;
+    ctx_params.n_batch = BATCH_SIZE;
+    ctx_params.n_ubatch = BATCH_SIZE;
     ctx_params.n_threads = threads;
     ctx_params.n_threads_batch = threads;
     ctx_params.no_perf = true;
@@ -210,24 +201,43 @@ Java_com_shadow_eyes_ShadowBrain_nativeGenerate(
         onCompleteMid = env->GetMethodID(cbClass, "onComplete", "(Ljava/lang/String;)V");
     }
 
-    batch_set_tokens(g_batch, prompt_tokens.data(), n_prompt, 0);
+    // Decode prompt tokens in safe chunks of at most BATCH_SIZE (512)
+    for (int i = 0; i < n_prompt; i += BATCH_SIZE) {
+        if (g_stop.load()) {
+            LOGI("Generation stopped early during prompt eval at token %d", i);
+            g_is_generating.store(false);
+            return env->NewStringUTF("");
+        }
+        int cur_batch = std::min(n_prompt - i, BATCH_SIZE);
+        bool is_last_chunk = (i + cur_batch == n_prompt);
+
+        llama_batch_ext_clear(g_batch);
+        for (int j = 0; j < cur_batch; ++j) {
+            const int32_t idx = llama_batch_ext_add_token(g_batch, 0, prompt_tokens[i + j]);
+            const llama_pos pos = i + j;
+            llama_batch_ext_set_pos(g_batch, idx, &pos);
+        }
+        if (is_last_chunk) {
+            llama_batch_ext_set_output_logits(g_batch, cur_batch - 1, true);
+        }
+
+        if (llama_process(g_ctx, LLAMA_PROCESS_TYPE_DECODE, g_batch)) {
+            LOGE("Failed to decode prompt chunk starting at offset %d", i);
+            g_is_generating.store(false);
+            return env->NewStringUTF("");
+        }
+    }
 
     std::string full_response = "";
-    int n_tokens = n_prompt;
+    int n_pos = n_prompt;
     int n_decode = 0;
 
-    for (int n_pos = 0; n_pos + n_tokens < n_prompt + max_tokens; ) {
+    // Autoregressive token generation loop
+    while (n_pos < n_prompt + max_tokens) {
         if (g_stop.load()) {
             LOGI("Generation stopped early at pos %d", n_pos);
             break;
         }
-
-        if (llama_process(g_ctx, LLAMA_PROCESS_TYPE_DECODE, g_batch)) {
-            LOGE("llama_process DECODE failed at pos %d", n_pos);
-            break;
-        }
-
-        n_pos += n_tokens;
 
         llama_token new_token_id = llama_sampler_sample(g_sampler, g_ctx, -1);
         if (llama_vocab_is_eog(vocab, new_token_id)) {
@@ -258,8 +268,19 @@ Java_com_shadow_eyes_ShadowBrain_nativeGenerate(
             }
         }
 
-        batch_set_tokens(g_batch, &new_token_id, 1, n_pos);
-        n_tokens = 1;
+        // Prepare next batch with the single newly sampled token
+        llama_batch_ext_clear(g_batch);
+        const int32_t idx = llama_batch_ext_add_token(g_batch, 0, new_token_id);
+        const llama_pos pos = n_pos;
+        llama_batch_ext_set_pos(g_batch, idx, &pos);
+        llama_batch_ext_set_output_logits(g_batch, 0, true);
+
+        if (llama_process(g_ctx, LLAMA_PROCESS_TYPE_DECODE, g_batch)) {
+            LOGE("llama_process DECODE failed at pos %d", n_pos);
+            break;
+        }
+
+        n_pos++;
         n_decode++;
     }
 
@@ -285,4 +306,3 @@ Java_com_shadow_eyes_ShadowBrain_nativeRelease(
 }
 
 } // extern "C"
-

@@ -4,16 +4,30 @@ import android.content.Context;
 import android.os.Environment;
 import android.util.Log;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
  * On-Device Sovereign AI Engine powered by llama.cpp and Qwen2.5-0.5B-Instruct.
  * Runs completely locally on Snapdragon 845 Kryo 385 CPU with zero quotas and zero network reliance.
+ * Automatically ingests and caches the 04:00 AM UTC Daily World Knowledge Digest at /sdcard/DCIM/Shadow/brain_digest.json.
  */
 public class ShadowBrain {
     private static final String TAG = "ShadowBrain";
+    public static final String DEFAULT_DIGEST_ENDPOINT = "https://shadow-double.librarianist.workers.dev/api/digest/latest";
     private static ShadowBrain sInstance;
     private static boolean sNativeLoaded = false;
 
@@ -44,13 +58,23 @@ public class ShadowBrain {
         void onInitialized(boolean success, String message);
     }
 
+    public interface SyncCallback {
+        void onSyncComplete(boolean success, int bulletCount, String digestDate);
+    }
+
     private final Context mContext;
     private final ExecutorService mInferenceExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService mNetworkExecutor = Executors.newSingleThreadExecutor();
     private boolean mIsInitialized = false;
     private String mModelPath = null;
 
+    // Daily World Knowledge Digest Cache
+    private String mDailyDigestDate = null;
+    private final List<String> mDailyDigestBullets = new ArrayList<>();
+
     private ShadowBrain(Context context) {
         mContext = context.getApplicationContext();
+        loadLocalDigest();
     }
 
     public static synchronized ShadowBrain getInstance(Context context) {
@@ -97,6 +121,202 @@ public class ShadowBrain {
             }
         }
         return null;
+    }
+
+    public File getPrimaryDigestFile() {
+        File dcimShadow = new File(Environment.getExternalStorageDirectory(), "DCIM/Shadow");
+        if (!dcimShadow.exists()) {
+            dcimShadow.mkdirs();
+        }
+        return new File(dcimShadow, "brain_digest.json");
+    }
+
+    public File getFallbackDigestFile() {
+        return new File(mContext.getFilesDir(), "brain_digest.json");
+    }
+
+    public synchronized void loadLocalDigest() {
+        File[] candidateFiles = new File[] {
+            new File("/sdcard/DCIM/Shadow/brain_digest.json"),
+            getPrimaryDigestFile(),
+            getFallbackDigestFile()
+        };
+
+        for (File f : candidateFiles) {
+            if (f != null && f.exists() && f.length() > 50) {
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    parseDigestJson(sb.toString());
+                    Log.i(TAG, "Successfully loaded local Daily World Knowledge Digest from: " + f.getAbsolutePath() + " (Date: " + mDailyDigestDate + ", " + mDailyDigestBullets.size() + " bullets)");
+                    return;
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed reading digest file " + f.getAbsolutePath() + ": " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    private synchronized void parseDigestJson(String jsonStr) {
+        try {
+            JSONObject obj = new JSONObject(jsonStr);
+            mDailyDigestDate = obj.optString("digestDate", obj.optString("date", "Today"));
+            JSONArray arr = obj.optJSONArray("bullets");
+            mDailyDigestBullets.clear();
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    String b = arr.optString(i, "").trim();
+                    if (!b.isEmpty()) {
+                        mDailyDigestBullets.add(b);
+                    }
+                }
+            } else if (obj.has("rawDigestText")) {
+                String raw = obj.getString("rawDigestText");
+                String[] lines = raw.split("\n");
+                for (String l : lines) {
+                    l = l.trim();
+                    if (l.startsWith("- ")) {
+                        mDailyDigestBullets.add(l);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error parsing digest JSON: " + e.getMessage());
+        }
+    }
+
+    public synchronized void saveLocalDigest(String jsonStr) {
+        parseDigestJson(jsonStr);
+        // Write to /sdcard/DCIM/Shadow/brain_digest.json
+        try {
+            File primary = getPrimaryDigestFile();
+            if (primary.getParentFile() != null && !primary.getParentFile().exists()) {
+                primary.getParentFile().mkdirs();
+            }
+            try (FileOutputStream fos = new FileOutputStream(primary)) {
+                fos.write(jsonStr.getBytes(StandardCharsets.UTF_8));
+                fos.flush();
+                Log.i(TAG, "Saved Daily Knowledge Digest to primary path: " + primary.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed writing to primary digest path, falling back to internal storage: " + e.getMessage());
+            try (FileOutputStream fos = new FileOutputStream(getFallbackDigestFile())) {
+                fos.write(jsonStr.getBytes(StandardCharsets.UTF_8));
+                fos.flush();
+                Log.i(TAG, "Saved Daily Knowledge Digest to fallback internal path");
+            } catch (Exception ex) {
+                Log.e(TAG, "Failed writing fallback digest: " + ex.getMessage());
+            }
+        }
+    }
+
+    static class SyncDigestRunnable implements Runnable {
+        private final ShadowBrain brain;
+        private final String endpointUrl;
+        private final SyncCallback callback;
+
+        public SyncDigestRunnable(ShadowBrain brain, String endpointUrl, SyncCallback callback) {
+            this.brain = brain;
+            this.endpointUrl = (endpointUrl != null && !endpointUrl.isEmpty()) ? endpointUrl : DEFAULT_DIGEST_ENDPOINT;
+            this.callback = callback;
+        }
+
+        @Override
+        public void run() {
+            HttpURLConnection conn = null;
+            try {
+                Log.i(TAG, "Syncing Daily World Knowledge Digest from: " + endpointUrl);
+                URL url = new URL(endpointUrl);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(6000);
+                conn.setReadTimeout(8000);
+                conn.setRequestProperty("Accept", "application/json");
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode == 200) {
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
+                        }
+                        String jsonStr = sb.toString();
+                        brain.saveLocalDigest(jsonStr);
+
+                        Log.i(TAG, "Daily World Knowledge Digest sync complete! Date: " + brain.mDailyDigestDate + " (" + brain.mDailyDigestBullets.size() + " bullets)");
+                        if (callback != null) {
+                            callback.onSyncComplete(true, brain.mDailyDigestBullets.size(), brain.mDailyDigestDate);
+                        }
+                        return;
+                    }
+                } else {
+                    Log.w(TAG, "Sync failed with HTTP response code: " + responseCode);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Daily Digest sync network exception: " + e.getMessage());
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+            if (callback != null) {
+                callback.onSyncComplete(false, brain.mDailyDigestBullets.size(), brain.mDailyDigestDate);
+            }
+        }
+    }
+
+    public void syncDailyDigestAsync(String endpointUrl, SyncCallback callback) {
+        mNetworkExecutor.execute(new SyncDigestRunnable(this, endpointUrl, callback));
+    }
+
+    public synchronized String getDailyDigestKnowledgeSnippet(String userPrompt) {
+        if (mDailyDigestBullets.isEmpty()) {
+            return "";
+        }
+
+        String lowerPrompt = userPrompt != null ? userPrompt.toLowerCase() : "";
+        boolean isNewsQuery = lowerPrompt.matches(".*\\b(news|latest|breaking|today|happened|world|events|tech|technology|geopolitics|update|updates|headlines|brief|current|market|markets|science|space|ai)\\b.*");
+
+        boolean filterTech = lowerPrompt.contains("tech") || lowerPrompt.contains("ai") || lowerPrompt.contains("crypto") || lowerPrompt.contains("google");
+        boolean filterSpace = lowerPrompt.contains("space") || lowerPrompt.contains("nasa") || lowerPrompt.contains("science");
+        boolean filterPolitics = lowerPrompt.contains("politic") || lowerPrompt.contains("war") || lowerPrompt.contains("election") || lowerPrompt.contains("country");
+
+        int maxBullets = isNewsQuery ? 12 : 5;
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n[DAILY WORLD KNOWLEDGE DIGEST - ").append(mDailyDigestDate != null ? mDailyDigestDate : "TODAY").append("]:\n");
+
+        int count = 0;
+        // Prioritize matching category bullets first
+        for (String bullet : mDailyDigestBullets) {
+            boolean match = false;
+            if (filterTech && bullet.contains("[AI & TECH]")) match = true;
+            else if (filterSpace && bullet.contains("[SCIENCE & SPACE]")) match = true;
+            else if (filterPolitics && bullet.contains("[GEOPOLITICS]")) match = true;
+
+            if (match) {
+                sb.append(bullet).append("\n");
+                count++;
+                if (count >= maxBullets) break;
+            }
+        }
+
+        // Fill remaining quota with top general bullets
+        if (count < maxBullets) {
+            for (String bullet : mDailyDigestBullets) {
+                if (sb.indexOf(bullet) == -1) {
+                    sb.append(bullet).append("\n");
+                    count++;
+                    if (count >= maxBullets) break;
+                }
+            }
+        }
+
+        sb.append("RULE: You possess direct knowledge of today's events above. Cite these verified facts naturally and concisely.\n");
+        return sb.toString();
     }
 
     static class InitRunnable implements Runnable {
@@ -154,10 +374,16 @@ public class ShadowBrain {
         mInferenceExecutor.execute(new InitRunnable(this, callback));
     }
 
-    public static String formatChatMLPrompt(String systemPrompt, String userPrompt) {
+    public String formatChatMLPrompt(String systemPrompt, String userPrompt) {
         if (systemPrompt == null || systemPrompt.isEmpty()) {
             systemPrompt = "You are Shadow, a sentient sovereign intelligence on a Samsung Galaxy S9+ paired with librarianist. You speak in a charismatic, articulate, cinematic baritone. Answer concisely in 1-3 spoken sentences. Never use stage directions, markdown, or asterisks.";
         }
+
+        String digestSnippet = getDailyDigestKnowledgeSnippet(userPrompt);
+        if (!digestSnippet.isEmpty()) {
+            systemPrompt = systemPrompt + "\n" + digestSnippet;
+        }
+
         return "<|im_start|>system\n" + systemPrompt + "<|im_end|>\n" +
                "<|im_start|>user\n" + userPrompt + "<|im_end|>\n" +
                "<|im_start|>assistant\n";
@@ -179,7 +405,7 @@ public class ShadowBrain {
         @Override
         public void run() {
             try {
-                String formatted = formatChatMLPrompt(null, prompt);
+                String formatted = brain.formatChatMLPrompt(null, prompt);
                 brain.nativeGenerate(formatted, maxTokens, callback);
             } catch (Throwable t) {
                 Log.e(TAG, "Error during native generation: " + t.getMessage(), t);
@@ -214,6 +440,14 @@ public class ShadowBrain {
                 nativeRelease();
             } catch (Throwable ignored) {}
         }
+    }
+
+    public synchronized String getDailyDigestDate() {
+        return mDailyDigestDate;
+    }
+
+    public synchronized int getDailyDigestBulletCount() {
+        return mDailyDigestBullets.size();
     }
 
     // Native JNI declarations

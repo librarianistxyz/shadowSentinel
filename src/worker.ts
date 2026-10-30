@@ -1,4 +1,5 @@
 import { findWorldLeader } from './world_leaders';
+import { executeDailyDigestPipeline, getLatestDailyDigest } from './daily_digest';
 
 export interface Env {
   AI?: {
@@ -555,6 +556,35 @@ export default {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
+      }
+
+      // Daily Sentinel Knowledge Digest Endpoints (04:00 AM UTC Cron & Samsung S9+ Sync)
+      if (url.pathname === '/api/digest/latest') {
+        const digest = await getLatestDailyDigest(env);
+        if (!digest) {
+          return new Response(JSON.stringify({ status: 'empty', message: 'No daily digest generated yet.' }), {
+            status: 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify(digest), {
+          headers: { 
+            ...corsHeaders, 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=3600'
+          },
+        });
+      }
+
+      if (url.pathname === '/api/digest/trigger') {
+        const record = await executeDailyDigestPipeline(env);
+        return new Response(JSON.stringify({
+          status: 'success',
+          message: 'Daily Sentinel World Knowledge Digest generated and synced',
+          digest: record
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       // ================================================================
@@ -1841,6 +1871,12 @@ export default {
     }
 
     return new Response('Shadow Double Vessel Online. No assets bound.', { status: 200 });
+  },
+
+  // Daily Scheduled Cron Trigger (04:00 AM UTC)
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    console.log(`[SCHEDULED CRON 04:00 AM UTC]: Triggering Daily Sentinel Knowledge Digest pipeline at ${event.cron} (${new Date().toISOString()})...`);
+    ctx.waitUntil(executeDailyDigestPipeline(env));
   },
 };
 

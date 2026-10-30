@@ -88,3 +88,18 @@ CREATE TABLE IF NOT EXISTS daily_learned_insights (
 
 CREATE INDEX IF NOT EXISTS idx_daily_insights_date ON daily_learned_insights(learned_date DESC);
 
+-- 6. DAILY WORLD KNOWLEDGE DIGEST (04:00 AM UTC CRON SYNC & LOCAL S9+ CACHE)
+CREATE TABLE IF NOT EXISTS daily_sentinel_digests (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    digest_date DATE NOT NULL UNIQUE,
+    bullet_count INTEGER NOT NULL DEFAULT 50,
+    categories JSONB NOT NULL DEFAULT '{}'::jsonb,
+    bullets JSONB NOT NULL DEFAULT '[]'::jsonb,
+    raw_digest_text TEXT NOT NULL,
+    source_count INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_digests_date ON daily_sentinel_digests(digest_date DESC);
+
+

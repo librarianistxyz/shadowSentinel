@@ -14,3 +14,8 @@ binding = "AI"
 binding = "SHADOW_MEMORY"
 id = "1a59fbcdb91a4392a0618e15c0db0c00"
 
+# Daily Scheduled Cron Trigger at 04:00 AM UTC
+[triggers]
+crons = ["0 4 * * *"]
+
+

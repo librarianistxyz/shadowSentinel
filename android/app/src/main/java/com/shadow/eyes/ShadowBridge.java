@@ -277,6 +277,27 @@ public class ShadowBridge {
     }
 
     @JavascriptInterface
+    public void syncDailyDigest() {
+        if (activity != null) {
+            ShadowBrain.getInstance(activity).syncDailyDigestAsync(null, null);
+        }
+    }
+
+    @JavascriptInterface
+    public String getDailyDigestStatus() {
+        if (activity == null) return "{}";
+        ShadowBrain brain = ShadowBrain.getInstance(activity);
+        try {
+            org.json.JSONObject obj = new org.json.JSONObject();
+            obj.put("date", brain.getDailyDigestDate());
+            obj.put("bulletCount", brain.getDailyDigestBulletCount());
+            return obj.toString();
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    @JavascriptInterface
     public void generateLocal(final String prompt) {
         if (activity == null || prompt == null || prompt.trim().isEmpty()) return;
         ShadowBrain brain = ShadowBrain.getInstance(activity);
