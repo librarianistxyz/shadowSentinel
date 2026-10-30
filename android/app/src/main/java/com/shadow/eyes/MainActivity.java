@@ -1612,6 +1612,87 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             return launchAppByName(param);
         }
 
+        // ================================================================
+        // EXPANDED IOT & HARDWARE ECOSYSTEM INTEGRATIONS
+        // ================================================================
+
+        // 1. Smart Lights (Home Assistant / Hue / SmartThings intent)
+        if (action.equals("SMART_LIGHT")) {
+            android.util.Log.i("ShadowEyes", "[IOT INTEGRATION] Smart Lights Action: " + param);
+            Intent lightIntent = new Intent("com.shadow.action.SMART_LIGHT");
+            lightIntent.putExtra("query", param);
+            sendBroadcast(lightIntent);
+            return true;
+        }
+
+        // 2. Smart Locks (Check status / lock / unlock)
+        if (action.equals("SMART_LOCK")) {
+            android.util.Log.i("ShadowEyes", "[IOT INTEGRATION] Smart Lock Action: " + param);
+            Intent lockIntent = new Intent("com.shadow.action.SMART_LOCK");
+            lockIntent.putExtra("query", param);
+            sendBroadcast(lockIntent);
+            return true;
+        }
+
+        // 3. Security Cameras (Analyze authorized feeds)
+        if (action.equals("SECURITY_CAM")) {
+            android.util.Log.i("ShadowEyes", "[IOT INTEGRATION] Security Camera Feed Request: " + param);
+            Intent camIntent = new Intent("com.shadow.action.SECURITY_CAM");
+            camIntent.putExtra("feed", param);
+            sendBroadcast(camIntent);
+            return true;
+        }
+
+        // 4. Computer & Desktop Automation Workflows
+        if (action.equals("COMPUTER_ACTION")) {
+            android.util.Log.i("ShadowEyes", "[DESKTOP INTEGRATION] Computer Automation Action: " + param);
+            Intent compIntent = new Intent("com.shadow.action.COMPUTER_WORKFLOW");
+            compIntent.putExtra("action", param);
+            sendBroadcast(compIntent);
+            return true;
+        }
+
+        // 5. Smart Speakers & Intercom Announcements
+        if (action.equals("SMART_SPEAKER")) {
+            android.util.Log.i("ShadowEyes", "[SMART SPEAKER] Broadcast Announcement: " + param);
+            Intent speakerIntent = new Intent("com.shadow.action.SMART_SPEAKER");
+            speakerIntent.putExtra("message", param);
+            sendBroadcast(speakerIntent);
+            return true;
+        }
+
+        // 6. Compatible Robots (Vacuum, Rover, Manipulator)
+        if (action.equals("ROBOT_CMD")) {
+            android.util.Log.i("ShadowEyes", "[ROBOTICS INTEGRATION] Issue Task Command: " + param);
+            Intent robotIntent = new Intent("com.shadow.action.ROBOT_COMMAND");
+            robotIntent.putExtra("command", param);
+            sendBroadcast(robotIntent);
+            return true;
+        }
+
+        // 7. Environmental Sensors (Temperature, Humidity, Motion)
+        if (action.equals("SENSOR_QUERY")) {
+            android.util.Log.i("ShadowEyes", "[SENSOR INTEGRATION] Environmental Sensor Poll: " + param);
+            Intent sensorIntent = new Intent("com.shadow.action.SENSOR_POLL");
+            sensorIntent.putExtra("type", param);
+            sendBroadcast(sensorIntent);
+            return true;
+        }
+
+        // 8. Calendar & Schedule Access
+        if (action.equals("CALENDAR_ACTION")) {
+            android.util.Log.i("ShadowEyes", "[CALENDAR INTEGRATION] Calendar Access Action: " + param);
+            try {
+                Intent calIntent = new Intent(Intent.ACTION_VIEW);
+                calIntent.setData(Uri.parse("content://com.android.calendar/time/" + System.currentTimeMillis()));
+                calIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(calIntent);
+                return true;
+            } catch (Exception e) {
+                android.util.Log.e("ShadowEyes", "Calendar access error", e);
+            }
+        }
+
         return false;
     }
 

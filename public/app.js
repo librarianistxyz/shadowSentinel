@@ -1470,6 +1470,22 @@ function hasUserCommandIntent(actionType, userPrompt) {
       return /\b(timer|alarm)\b/i.test(p);
     case 'CALL_NUMBER':
       return /\b(call|dial|phone)\b/i.test(p);
+    case 'SMART_LIGHT':
+      return /\b(light|lights|bulb|dim|brighten|turn on light|turn off light)\b/i.test(p);
+    case 'SMART_LOCK':
+      return /\b(lock|unlock|door|bolt|latch)\b/i.test(p);
+    case 'SECURITY_CAM':
+      return /\b(camera|cam|feed|surveillance|security camera|front door camera|cctv)\b/i.test(p);
+    case 'COMPUTER_ACTION':
+      return /\b(computer|pc|desktop|laptop|file|files|automate|workflow|script)\b/i.test(p);
+    case 'SMART_SPEAKER':
+      return /\b(speaker|speakers|announce|announcement|broadcast|intercom)\b/i.test(p);
+    case 'ROBOT_CMD':
+      return /\b(robot|vacuum|cleaner|rover|dock|bot)\b/i.test(p);
+    case 'SENSOR_QUERY':
+      return /\b(sensor|temperature|humidity|temp|motion|reading|readings)\b/i.test(p);
+    case 'CALENDAR_ACTION':
+      return /\b(calendar|schedule|meeting|appointment|remind|reminder|event)\b/i.test(p);
     default:
       return false;
   }

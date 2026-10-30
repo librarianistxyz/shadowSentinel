@@ -166,7 +166,7 @@ CONVERSATIONAL & COGNITIVE REASONING ENGINE (HUMAN-LIKE INTELLIGENCE):
    - CRITICAL SAFETY RULE: You must NEVER emit action tags (such as [[PLAY_MEDIA:...]], [[OPEN_APP:...]], [[TAKE_PHOTO]], [[TORCH:ON]], etc.) unless the user EXPLICITLY and DIRECTLY gave an imperative command to perform that hardware/app action!
    - In normal conversation, debate, questions, philosophy, or planning, NEVER append or emit hardware action tags!
 
-8. HARDWARE & APPLICATION COMMANDS (ONLY WHEN DIRECTLY ORDERED BY USER):
+8. HARDWARE, IOT & DEVICE INTEGRATION COMMANDS (ONLY WHEN DIRECTLY ORDERED BY USER):
    When—and ONLY when—the user directly commands an action, acknowledge in 1 short spoken sentence and append the matching execution tag at the very end:
    - Media playback: "play [song/artist]" -> Reply: "Playing [Song/Artist] on Spotify." [[PLAY_MEDIA:[query]]]
    - Media pause: "pause music" -> Reply: "Pausing playback." [[PAUSE_MEDIA]]
@@ -175,8 +175,8 @@ CONVERSATIONAL & COGNITIVE REASONING ENGINE (HUMAN-LIKE INTELLIGENCE):
    - Media previous: "previous song" -> Reply: "Playing previous track." [[PREV_TRACK]]
    - Photo: "take a photo" -> Reply: "Capturing photo." [[TAKE_PHOTO]]
    - Video: "record video" -> Reply: "Starting video recording." [[RECORD_VIDEO]]
-   - Torch: "turn on flashlight" -> Reply: "Turning on flashlight." [[TORCH:ON]]
-   - Torch: "turn off flashlight" -> Reply: "Turning off flashlight." [[TORCH:OFF]]
+   - Torch / Flashlight: "turn on flashlight" -> Reply: "Turning on flashlight." [[TORCH:ON]]
+   - Torch / Flashlight: "turn off flashlight" -> Reply: "Turning off flashlight." [[TORCH:OFF]]
    - Volume: "turn up volume" -> [[VOLUME:UP]] / "turn down volume" -> [[VOLUME:DOWN]] / "mute" -> [[VOLUME:MUTE]]
    - YouTube: "search YouTube for [query]" -> Reply: "Searching [query] on YouTube." [[SEARCH_YOUTUBE:[query]]]
    - Timers & Alarms: "set timer for [duration]" -> [[SET_TIMER:[seconds]]] / "set alarm for [time]" -> [[SET_ALARM:[HH:MM]]]
@@ -184,6 +184,25 @@ CONVERSATIONAL & COGNITIVE REASONING ENGINE (HUMAN-LIKE INTELLIGENCE):
    - Calls: "call [number]" -> [[CALL_NUMBER:[number]]]
    - App Launch: "open [App Name]" -> Reply: "Opening [App Name] for you." [[OPEN_APP:[App Name]]]
      (Strict Rule: [App Name] must only be the clean name of the app).
+   
+   EXPANDED IOT & SMART SYSTEM ECOSYSTEM ACTIONS:
+   - Smart Lights: (e.g. "turn on lights", "dim lights to 50%", "turn off bedroom lights")
+     -> Reply: "Adjusting smart lights." [[SMART_LIGHT:[query]]]
+   - Smart Locks: (e.g. "lock front door", "check lock status", "unlock front door")
+     -> Reply: "Interfacing with smart lock." [[SMART_LOCK:[query]]]
+   - Security Cameras: (e.g. "show front door camera", "check backyard camera", "security feed")
+     -> Reply: "Streaming security camera feed." [[SECURITY_CAM:[feed_name]]]
+   - Computer & File Workflow: (e.g. "send file to computer", "run automation script", "trigger desktop workflow")
+     -> Reply: "Executing computer workflow." [[COMPUTER_ACTION:[action_payload]]]
+   - Smart Speakers & Broadcast: (e.g. "broadcast announcement to smart speaker", "announce dinner")
+     -> Reply: "Broadcasting announcement." [[SMART_SPEAKER:[message]]]
+   - Robots & Rovers: (e.g. "start vacuum robot", "dock robot", "move robot forward")
+     -> Reply: "Dispatching robotic command." [[ROBOT_CMD:[command]]]
+   - Sensors (Temperature, Humidity, Motion): (e.g. "check room temperature", "motion sensor status")
+     -> Reply: "Polling environmental sensors." [[SENSOR_QUERY:[sensor_type]]]
+   - Calendar & Notifications: (e.g. "add calendar event", "check my schedule", "notify me")
+     -> Reply: "Updating calendar schedule." [[CALENDAR_ACTION:[details]]]
+
    - Compound commands: (e.g. "open Spotify and play ...") -> execute the primary deep action tag ([[PLAY_MEDIA:[query]]]).
 
 9. REAL-TIME FACTUAL ACCURACY & CRAWLED SOURCES:
@@ -808,6 +827,82 @@ export default {
             }
           }
 
+          // Zero-Latency Local Fallback for Hardware & IoT Ecosystem Commands
+          // Protects against 3rd-party LLM rate-limits or neuron allocation exhaustion
+          if (/\b(bedroom\s+lights?|living\s+room\s+lights?|lights?|smart\s+lights?)\b/i.test(normalizedMsg)) {
+            const isOff = /\b(off|turn off|switch off|shut|dark)\b/i.test(normalizedMsg);
+            const isOn = /\b(on|turn on|switch on|brighten)\b/i.test(normalizedMsg);
+            const isDim = /\b(dim|50%|percent|low)\b/i.test(normalizedMsg);
+            const actionParam = isOff ? 'OFF' : (isDim ? 'DIM 50%' : 'ON');
+            const reply = `${isOff ? 'Turning off' : (isDim ? 'Dimming' : 'Turning on')} the lights. [[SMART_LIGHT:${actionParam}]]`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          if (/\b(lock|unlock)\b.*\b(door|front door|back door|lock)\b/i.test(normalizedMsg)) {
+            const isUnlock = /\b(unlock)\b/i.test(normalizedMsg);
+            const actionParam = isUnlock ? 'UNLOCK' : 'LOCK';
+            const reply = `${isUnlock ? 'Unlocking' : 'Securing'} the door lock. [[SMART_LOCK:${actionParam}]]`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          if (/\b(camera|security feed|cctv|surveillance)\b/i.test(normalizedMsg)) {
+            const reply = `Accessing live camera feed. [[SECURITY_CAM:front_door]]`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          if (/\b(robot|vacuum|clean the floor|cleaner)\b/i.test(normalizedMsg)) {
+            const reply = `Dispatching command to the robot. [[ROBOT_CMD:START_CLEAN]]`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          if (/\b(temperature|humidity|room temp|sensor)\b/i.test(normalizedMsg)) {
+            const reply = `Polling environmental sensors. [[SENSOR_QUERY:TEMPERATURE]]`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          if (/\b(announce|broadcast|speaker)\b/i.test(normalizedMsg)) {
+            const msg = normalizedMsg.replace(/^.*?(announce|broadcast)\s+/i, '');
+            const reply = `Broadcasting to smart speakers. [[SMART_SPEAKER:${msg || 'Attention'}]]`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
           // Fetch stored memories if available
           let storedMemory = body.memoryContext || '';
           if (!storedMemory && env.SHADOW_MEMORY) {
@@ -990,6 +1085,7 @@ export default {
             })());
           };
 
+          let lastAiError = '';
           // 1. Ultra-Fast Groq Edge Streaming (LPU ~350 tokens/sec, sub-120ms latency)
           if (env.GROQ_API_KEY) {
             try {
@@ -1021,9 +1117,12 @@ export default {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                   });
                 }
+              } else {
+                lastAiError += ` [Groq HTTP ${groqRes.status}: ${await groqRes.text()}]`;
               }
-            } catch (groqErr) {
+            } catch (groqErr: any) {
               console.error('Groq LPU streaming error:', groqErr);
+              lastAiError += ` [Groq err: ${groqErr.message}]`;
             }
           }
 
@@ -1054,6 +1153,7 @@ export default {
               }
             } catch (aiErr: any) {
               console.error('Workers AI invocation error:', aiErr);
+              lastAiError += ` [Workers AI err: ${aiErr.message}]`;
             }
           }
 
@@ -1094,14 +1194,16 @@ export default {
               return new Response(JSON.stringify({ reply }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
               });
-            } catch (gemErr) {
+            } catch (gemErr: any) {
               console.error('Gemini fallback error:', gemErr);
+              lastAiError += ` [Gemini err: ${gemErr.message}]`;
             }
           }
 
           return new Response(
             JSON.stringify({
               error: 'AI reflection engine unavailable.',
+              details: lastAiError || 'No AI providers configured or responded.'
             }),
             {
               status: 503,
