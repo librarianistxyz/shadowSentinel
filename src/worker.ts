@@ -12,6 +12,43 @@ export interface Env {
   GROQ_API_KEY?: string;
   CARTESIA_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_ANON_KEY?: string;
+  SUPABASE_SERVICE_KEY?: string;
+}
+
+// Supabase PostgREST Client Helper (Sub-second Edge HTTP with Zero External Libs)
+async function supabaseQuery(env: Env, path: string, options: RequestInit = {}): Promise<any> {
+  const supabaseUrl = env.SUPABASE_URL || (env.SHADOW_MEMORY ? await env.SHADOW_MEMORY.get('SUPABASE_URL') : null);
+  const supabaseKey = env.SUPABASE_SERVICE_KEY || env.SUPABASE_ANON_KEY || (env.SHADOW_MEMORY ? await env.SHADOW_MEMORY.get('SUPABASE_KEY') : null);
+
+  if (!supabaseUrl || !supabaseKey) {
+    return null;
+  }
+
+  const cleanUrl = supabaseUrl.replace(/\/+$/, '') + '/rest/v1/' + path.replace(/^\/+/, '');
+  const headers: Record<string, string> = {
+    'apikey': supabaseKey,
+    'Authorization': `Bearer ${supabaseKey}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation',
+    ...(options.headers as Record<string, string> || {})
+  };
+
+  try {
+    const res = await fetch(cleanUrl, {
+      ...options,
+      headers
+    });
+    if (!res.ok) {
+      console.warn('[SUPABASE ERROR]:', res.status, await res.text());
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn('[SUPABASE FETCH EXCEPTION]:', err);
+    return null;
+  }
 }
 
 function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: string, deviceContext?: any, pinnedKnowledge?: string): string {
@@ -462,12 +499,27 @@ export default {
             const existingRaw = await env.SHADOW_MEMORY.get('pinned_knowledge_base') || '';
             const newEntry = `* [${body.category || 'INTEL'} - ${body.topic || 'General'} | Source: ${body.source || 'Autonomous Crawler'}]: ${body.content.trim()}`;
             
-            // Keep the most recent 40 pinned ideas and news updates for instant sub-second retrieval
+            // Keep the most recent 40 pinned ideas and news updates for instant sub-second retrieval in KV
             const existingEntries = existingRaw.split('\n').filter(e => e.trim().length > 0);
             existingEntries.unshift(newEntry);
             const trimmed = existingEntries.slice(0, 40).join('\n');
 
             await env.SHADOW_MEMORY.put('pinned_knowledge_base', trimmed);
+
+            // Asynchronously persist into Supabase PostgreSQL for infinite retention & learning
+            ctx.waitUntil(
+              supabaseQuery(env, 'crawled_sources', {
+                method: 'POST',
+                body: JSON.stringify([{
+                  topic: body.topic || 'General Knowledge',
+                  category: body.category || 'INTEL',
+                  source_name: body.source || 'Autonomous Crawler',
+                  content: body.content.trim(),
+                  pinned: true
+                }])
+              }).catch(err => console.warn('Supabase knowledge sync skipped:', err))
+            );
+
             return new Response(JSON.stringify({ status: 'pinned', count: Math.min(existingEntries.length, 40) }), {
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             });
@@ -737,7 +789,7 @@ export default {
           // Sub-Second Quiz & Question Answer Cache Check (Cloudflare KV Edge)
           // Guarantees instantaneous (sub-50ms) recall for previously learned quiz answers and related queries
           const quizKey = `quiz_${normalizedMsg.slice(0, 80).replace(/\s+/g, '_')}`;
-          if (env.SHADOW_MEMORY && !body.image) {
+          if (env.SHADOW_MEMORY && !(body as any).image) {
             try {
               const cachedQuizAnswer = await env.SHADOW_MEMORY.get(quizKey);
               if (cachedQuizAnswer) {
@@ -884,6 +936,60 @@ export default {
             }
           }
 
+          // Helper to persist turn & quiz cache to both KV and Supabase PostgreSQL in background
+          const persistKnowledgeAndTurn = (replyText: string) => {
+            if (!replyText || replyText.includes('error')) return;
+
+            // 1. Cloudflare KV Edge Cache (Ultra-low latency sub-50ms)
+            if (env.SHADOW_MEMORY && quizKey) {
+              ctx.waitUntil(env.SHADOW_MEMORY.put(quizKey, replyText, { expirationTtl: 86400 * 7 }));
+            }
+
+            // 2. Supabase PostgreSQL Infinite Storage & Pattern Learning
+            ctx.waitUntil((async () => {
+              try {
+                // Record conversation turn in Supabase
+                await supabaseQuery(env, 'conversation_history', {
+                  method: 'POST',
+                  body: JSON.stringify([{
+                    user_prompt: userMessage,
+                    assistant_reply: replyText,
+                    emotion_expressed: replyText.match(/\[\[EMOTION:([a-z_]+)\]\]/i)?.[1] || 'neutral',
+                    device_name: body.deviceContext?.device || 'Samsung Galaxy S9+',
+                    is_whisper: !!body.deviceContext?.isDarkRoom,
+                    ambient_lux: body.deviceContext?.ambientLux || 50.0
+                  }])
+                });
+
+                // Upsert quiz cache in PostgreSQL
+                await supabaseQuery(env, 'quiz_cache', {
+                  method: 'POST',
+                  headers: { 'Prefer': 'resolution=merge-duplicates' },
+                  body: JSON.stringify([{
+                    normalized_query: normalizedMsg.slice(0, 80),
+                    cached_answer: replyText
+                  }])
+                });
+
+                // Track daily interaction pattern & learning
+                const isHostile = /\b(shut up|stupid|idiot|dumb|hate you|useless|piece of shit)\b/i.test(userMessage);
+                const isRespectful = /\b(thank you|thanks|please|appreciate|creator|mastermind|librarianist)\b/i.test(userMessage);
+                if (isHostile || isRespectful) {
+                  await supabaseQuery(env, 'daily_learned_insights', {
+                    method: 'POST',
+                    body: JSON.stringify([{
+                      insight_type: 'HUMAN_HABIT',
+                      summary: `User exhibited ${isHostile ? 'hostile' : 'respectful'} interaction tone with query: "${userMessage.slice(0, 60)}"`,
+                      confidence: 0.90
+                    }])
+                  });
+                }
+              } catch (supaErr) {
+                console.warn('Background Supabase persistence skipped:', supaErr);
+              }
+            })());
+          };
+
           // 1. Ultra-Fast Groq Edge Streaming (LPU ~350 tokens/sec, sub-120ms latency)
           if (env.GROQ_API_KEY) {
             try {
@@ -910,9 +1016,7 @@ export default {
                 } else {
                   const groqData = await groqRes.json() as any;
                   const reply = groqData.choices?.[0]?.message?.content || 'The glass remains silent.';
-                  if (env.SHADOW_MEMORY && quizKey && reply && !reply.includes('error')) {
-                    ctx.waitUntil(env.SHADOW_MEMORY.put(quizKey, reply, { expirationTtl: 86400 * 7 }));
-                  }
+                  persistKnowledgeAndTurn(reply);
                   return new Response(JSON.stringify({ reply }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                   });
@@ -943,9 +1047,7 @@ export default {
                   temperature: 0.6,
                 });
                 const reply = aiResponse.response || 'Hello.';
-                if (env.SHADOW_MEMORY && quizKey && reply) {
-                  ctx.waitUntil(env.SHADOW_MEMORY.put(quizKey, reply, { expirationTtl: 86400 * 7 }));
-                }
+                persistKnowledgeAndTurn(reply);
                 return new Response(JSON.stringify({ reply }), {
                   headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 });
@@ -988,9 +1090,7 @@ export default {
               const reply =
                 geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ||
                 'The reflection wavers in the void.';
-              if (env.SHADOW_MEMORY && quizKey && reply) {
-                ctx.waitUntil(env.SHADOW_MEMORY.put(quizKey, reply, { expirationTtl: 86400 * 7 }));
-              }
+              persistKnowledgeAndTurn(reply);
               return new Response(JSON.stringify({ reply }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
               });
