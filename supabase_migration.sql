@@ -87,3 +87,4 @@ CREATE TABLE IF NOT EXISTS daily_learned_insights (
 );
 
 CREATE INDEX IF NOT EXISTS idx_daily_insights_date ON daily_learned_insights(learned_date DESC);
+

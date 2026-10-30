@@ -64,3 +64,4 @@ self.addEventListener('fetch', (event) => {
   // 2. TTS Audio & Dynamic Responses -> Network with Fallback
   event.respondWith(fetch(event.request));
 });
+

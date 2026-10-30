@@ -363,6 +363,34 @@ async function queryCloudflareAi(promptMessage) {
   return null;
 }
 
+// ==============================================================================
+// AUTONOMOUS PERFORMANCE EVALUATION, SELF-HEALING & ERROR TELEMETRY
+// ==============================================================================
+function recordTaskFailure(taskType, errorMessage, userQuery, recovered) {
+  var failureRecord = {
+    taskType: taskType || 'GENERAL_TASK',
+    status: 'FAILED',
+    errorMessage: String(errorMessage || 'Unknown error'),
+    userQuery: String(userQuery || '').slice(0, 80),
+    recoveryAttempted: !!recovered,
+    timestamp: Date.now()
+  };
+  console.warn('[SELF-HEAL TELEMETRY]:', failureRecord);
+  try {
+    localStorage.setItem('shadow_last_failure', JSON.stringify(failureRecord));
+  } catch(e) {}
+  try {
+    var evalUrl = (typeof CLOUDFLARE_AI_ENDPOINT === 'string') 
+      ? CLOUDFLARE_AI_ENDPOINT.replace(/\/api\/chat.*/, '/api/eval') 
+      : 'https://shadow-double.21libra.workers.dev/api/eval';
+    fetch(evalUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(failureRecord)
+    }).catch(function() {});
+  } catch(e) {}
+}
+
 // Keep screen awake (OLED desk sentinel mode)
 async function requestScreenLock() {
   try {
@@ -1802,6 +1830,25 @@ async function streamConversation(userPrompt) {
     return;
   }
 
+  // Instant Local Explanation of Failed Tasks
+  if (/^(?:why\s+did\s+(?:that|the\s+last\s+(?:task|command|operation|action)|it)\s+fail|what\s+went\s+wrong|explain\s+why\s+(?:you\s+couldnt|that\s+failed|it\s+failed)|why\s+didnt\s+that\s+work)[.!?]?$/i.test(cleanPrompt)) {
+    try {
+      var lastFailRaw = localStorage.getItem('shadow_last_failure');
+      if (lastFailRaw) {
+        var lastFail = JSON.parse(lastFailRaw);
+        if (Date.now() - lastFail.timestamp < 300000) { // within last 5 minutes
+          var whyReply = "The previous " + (lastFail.taskType || 'operation').toLowerCase() + " encountered an issue: " + lastFail.errorMessage + ". " + (lastFail.recoveryAttempted ? "My autonomous self-healing engine executed a local fallback and recovered the workflow." : "I have logged the error telemetry to prevent recurrence.");
+          conversationHistory.push({ role: 'user', content: cleanPrompt });
+          conversationHistory.push({ role: 'assistant', content: whyReply });
+          persistHistory(conversationHistory);
+          enqueueSpeechClause(whyReply);
+          isAwaitingResponse = false;
+          return;
+        }
+      }
+    } catch(e) {}
+  }
+
   // Instant Local Quiz & Q&A Fast Memory Cache (Sub-20ms instant recall for identical / repeated quiz prompts)
   var normalizedQuizKey = 'quiz_' + cleanPrompt.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, '_').slice(0, 80);
   try {
@@ -1868,12 +1915,18 @@ async function streamConversation(userPrompt) {
 
     if (!resp.ok || !resp.body) {
       if (thisTurnId !== conversationTurnId || isAcousticallySilenced) return;
+      console.warn('[STREAM FAILED]: Initial stream failed with HTTP ' + (resp ? resp.status : 'ERR') + '. Initiating autonomous recovery retry...');
+      // Recoverable retry pass
       var fallback = await queryCloudflareAi(cleanPrompt);
       if (fallback && thisTurnId === conversationTurnId && !isAcousticallySilenced) {
+        recordTaskFailure('NETWORK_STREAM', 'Recovered stream error: HTTP ' + (resp ? resp.status : 'ERR'), cleanPrompt, true);
         enqueueSpeechClause(fallback);
         conversationHistory.push({ role: 'assistant', content: fallback });
         persistHistory(conversationHistory);
       } else {
+        recordTaskFailure('NETWORK_STREAM', 'Edge reasoning worker unreachable: HTTP ' + (resp ? resp.status : 'ERR'), cleanPrompt, false);
+        var errSpoken = "I encountered a communication disruption with the reasoning cluster. Local controls remain online.";
+        enqueueSpeechClause(errSpoken);
         resumeMicrophone(50);
       }
       return;
@@ -2001,12 +2054,17 @@ async function streamConversation(userPrompt) {
       return;
     }
     console.warn('Streaming error:', err);
+    // Recoverable retry pass
     var errReply = await queryCloudflareAi(cleanPrompt);
     if (errReply && thisTurnId === conversationTurnId && !isAcousticallySilenced) {
+      recordTaskFailure('NETWORK_STREAM', err.message || 'Stream fetch failure (recovered)', cleanPrompt, true);
       enqueueSpeechClause(errReply);
       conversationHistory.push({ role: 'assistant', content: errReply });
       persistHistory(conversationHistory);
     } else {
+      recordTaskFailure('NETWORK_STREAM', err.message || 'Complete network outage', cleanPrompt, false);
+      var netErrSpoken = "I lost connection to the reasoning edge. Local commands remain available.";
+      enqueueSpeechClause(netErrSpoken);
       resumeMicrophone(50);
     }
   } finally {
@@ -2340,6 +2398,9 @@ async function playNeuralSpeechWithFallback(text, utteranceId, onComplete) {
 
       audio.onerror = function(err) {
         console.warn('[NEURAL TTS]: Playback error, falling back to native TTS', err);
+        if (typeof recordTaskFailure === 'function') {
+          recordTaskFailure('NEURAL_TTS', 'Audio playback error (recovered via native TTS)', text, true);
+        }
         if (window.ShadowNative && typeof window.ShadowNative.abandonMusicDucking === 'function') {
           window.ShadowNative.abandonMusicDucking();
         }
@@ -2353,6 +2414,9 @@ async function playNeuralSpeechWithFallback(text, utteranceId, onComplete) {
     }
   } catch (e) {
     clearTimeout(timer);
+    if (typeof recordTaskFailure === 'function') {
+      recordTaskFailure('NEURAL_TTS', 'Neural endpoint timeout or fetch failure (recovered via native TTS)', text, true);
+    }
   }
 
   // Gracefully and immediately use sinister native baritone engine
