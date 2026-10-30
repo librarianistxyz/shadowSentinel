@@ -1705,7 +1705,11 @@ function requestCameraFrame(useBack) {
   });
 }
 
-// Real-time Low-Latency Streaming from Cloudflare Edge
+// Sovereign On-Device LLM State (llama.cpp compiled into APK)
+var brainAccumulatedClause = "";
+var brainFullResponse = "";
+
+// Real-time Low-Latency Streaming from Cloudflare Edge or On-Device Sovereign Engine
 async function streamConversation(userPrompt) {
   if (!userPrompt || !userPrompt.trim()) return;
   
@@ -2061,6 +2065,16 @@ async function streamConversation(userPrompt) {
     conversationHistory = conversationHistory.slice(-20);
   }
   persistHistory(conversationHistory);
+
+  // Sovereign On-Device LLM (llama.cpp compiled into APK)
+  // If Qwen2.5-0.5B-Instruct is loaded, run completely on-device without quota or network!
+  if (window.ShadowNative && typeof window.ShadowNative.isBrainLoaded === 'function' && window.ShadowNative.isBrainLoaded() && !isVisionQuery) {
+    console.log('[SOVEREIGN ENGINE]: Executing query locally on Kryo 385 CPU via llama.cpp...');
+    brainAccumulatedClause = "";
+    brainFullResponse = "";
+    window.ShadowNative.generateLocal(cleanPrompt);
+    return;
+  }
 
   try {
     var userRapport = recordUserTreatment(cleanPrompt);
@@ -2660,6 +2674,50 @@ window.ShadowMouth = {
   
   // Real-time Streaming Conversation
   streamConversation: streamConversation,
+
+  // Sovereign On-Device LLM (llama.cpp) Handlers
+  onBrainReady: function(isReady) {
+    console.log('[SOVEREIGN ENGINE READY]: Qwen2.5-0.5B-Instruct ready on Snapdragon 845:', isReady);
+  },
+
+  onBrainToken: function(token) {
+    if (!token || isAcousticallySilenced) return;
+    isThinkingActive = false;
+    brainFullResponse += token;
+    brainAccumulatedClause += token;
+
+    // Sentence splitting for smooth real-time conversational speech
+    var isSentenceTerminator = /[.!?]/.test(token) && brainAccumulatedClause.trim().split(/\s+/).length >= 4;
+    var isLengthyClause = brainAccumulatedClause.trim().split(/\s+/).length >= 14;
+
+    if (isSentenceTerminator || isLengthyClause) {
+      if (!isAcousticallySilenced) {
+        enqueueSpeechClause(brainAccumulatedClause);
+      }
+      brainAccumulatedClause = "";
+    }
+  },
+
+  onBrainComplete: function(fullText) {
+    if (brainAccumulatedClause.trim().length > 0 && !isAcousticallySilenced) {
+      enqueueSpeechClause(brainAccumulatedClause);
+      brainAccumulatedClause = "";
+    }
+    isAwaitingResponse = false;
+    isThinkingActive = false;
+    if (fullText && fullText.trim()) {
+      conversationHistory.push({ role: 'assistant', content: fullText.trim() });
+      persistHistory(conversationHistory);
+    }
+    resumeMicrophone(50);
+  },
+
+  onBrainError: function(err) {
+    console.warn('[SOVEREIGN ENGINE ERROR]:', err);
+    isAwaitingResponse = false;
+    isThinkingActive = false;
+    resumeMicrophone(50);
+  },
   
   // Set emotional expression (Smiling, Angry, Frustrated, Curious, Smug, Surprised, etc.)
   setExpression: function(name) {

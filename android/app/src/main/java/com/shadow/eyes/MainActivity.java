@@ -594,6 +594,32 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
 
         // Active Voice Watchdog: Ensures microphone and speech flags NEVER get stuck
         mainHandler.postDelayed(new TtsWatchdogTask(this), 1000);
+
+        // Sovereign AI Engine: Initialize on-device llama.cpp + Qwen2.5-0.5B-Instruct
+        ShadowBrain.getInstance(this).initAsync(new ShadowBrainInitCallback(this));
+    }
+
+    static class BrainReadyUiTask implements Runnable {
+        private final MainActivity activity;
+        public BrainReadyUiTask(MainActivity activity) { this.activity = activity; }
+        @Override
+        public void run() {
+            if (activity != null && activity.webView != null) {
+                activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.onBrainReady && window.ShadowMouth.onBrainReady(true);", null);
+            }
+        }
+    }
+
+    static class ShadowBrainInitCallback implements ShadowBrain.InitCallback {
+        private final MainActivity activity;
+        public ShadowBrainInitCallback(MainActivity activity) { this.activity = activity; }
+        @Override
+        public void onInitialized(boolean success, String message) {
+            android.util.Log.i("ShadowEyes", "ShadowBrain onInitialized: " + success + " (" + message + ")");
+            if (success && activity != null) {
+                activity.runOnUiThread(new BrainReadyUiTask(activity));
+            }
+        }
     }
 
     private static java.lang.ref.WeakReference<MainActivity> instanceRef;
@@ -1283,6 +1309,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         public void run() {
             if (activity == null) return;
             android.util.Log.i("ShadowEyes", "Acoustic interruption received ('listen' / 'quiet') - shutting up completely, waiting for next question");
+            ShadowBrain.getInstance(activity).stop();
             activity.speechSessionId++;
             if (activity.textToSpeech != null) {
                 activity.textToSpeech.stop();
@@ -2093,5 +2120,6 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         if (sentinelCamera != null) {
             sentinelCamera.stop();
         }
+        ShadowBrain.getInstance(this).release();
     }
 }

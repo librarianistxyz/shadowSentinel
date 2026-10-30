@@ -188,9 +188,114 @@ public class ShadowBridge {
         }
     }
 
+    static class BrainTokenTask implements Runnable {
+        private final MainActivity activity;
+        private final String token;
+        public BrainTokenTask(MainActivity activity, String token) {
+            this.activity = activity;
+            this.token = token;
+        }
+        @Override
+        public void run() {
+            if (activity != null && activity.webView != null) {
+                activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.onBrainToken && window.ShadowMouth.onBrainToken(" + org.json.JSONObject.quote(token) + ");", null);
+            }
+        }
+    }
+
+    static class BrainCompleteTask implements Runnable {
+        private final MainActivity activity;
+        private final String fullResponse;
+        public BrainCompleteTask(MainActivity activity, String fullResponse) {
+            this.activity = activity;
+            this.fullResponse = fullResponse;
+        }
+        @Override
+        public void run() {
+            if (activity != null && activity.webView != null) {
+                activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.onBrainComplete && window.ShadowMouth.onBrainComplete(" + org.json.JSONObject.quote(fullResponse) + ");", null);
+            }
+        }
+    }
+
+    static class BrainErrorTask implements Runnable {
+        private final MainActivity activity;
+        private final String error;
+        public BrainErrorTask(MainActivity activity, String error) {
+            this.activity = activity;
+            this.error = error;
+        }
+        @Override
+        public void run() {
+            if (activity != null && activity.webView != null) {
+                activity.webView.evaluateJavascript("window.ShadowMouth && window.ShadowMouth.onBrainError && window.ShadowMouth.onBrainError(" + org.json.JSONObject.quote(error) + ");", null);
+            }
+        }
+    }
+
+    static class LocalBrainCallback implements ShadowBrain.BrainCallback {
+        private final MainActivity activity;
+        public LocalBrainCallback(MainActivity activity) {
+            this.activity = activity;
+        }
+        @Override
+        public void onToken(String token) {
+            if (activity != null) {
+                activity.runOnUiThread(new BrainTokenTask(activity, token));
+            }
+        }
+        @Override
+        public void onComplete(String fullResponse) {
+            if (activity != null) {
+                activity.runOnUiThread(new BrainCompleteTask(activity, fullResponse));
+            }
+        }
+        @Override
+        public void onError(String error) {
+            if (activity != null) {
+                activity.runOnUiThread(new BrainErrorTask(activity, error));
+            }
+        }
+    }
+
+    @JavascriptInterface
+    public boolean isBrainLoaded() {
+        if (activity == null) return false;
+        return ShadowBrain.getInstance(activity).isModelLoaded();
+    }
+
+    @JavascriptInterface
+    public boolean isBrainNativeAvailable() {
+        if (activity == null) return false;
+        return ShadowBrain.getInstance(activity).isNativeLoaded();
+    }
+
+    @JavascriptInterface
+    public void initBrain() {
+        if (activity == null) return;
+        ShadowBrain.getInstance(activity).initAsync(null);
+    }
+
+    @JavascriptInterface
+    public void generateLocal(final String prompt) {
+        if (activity == null || prompt == null || prompt.trim().isEmpty()) return;
+        ShadowBrain brain = ShadowBrain.getInstance(activity);
+        if (!brain.isModelLoaded()) {
+            android.util.Log.w("ShadowBridge", "generateLocal called but ShadowBrain is not loaded");
+            return;
+        }
+        brain.generateAsync(prompt, 256, new LocalBrainCallback(activity));
+    }
+
+    @JavascriptInterface
+    public void stopBrain() {
+        if (activity != null) {
+            ShadowBrain.getInstance(activity).stop();
+        }
+    }
+
     @JavascriptInterface
     public String getSystemStatus() {
         return "ONLINE - AMOLED 0-NIT SENTINEL ACTIVE";
     }
 }
-

@@ -55,6 +55,16 @@ cd "${BUILD_DIR}/apk"
 zip -u unaligned.apk classes.dex
 cd - > /dev/null
 
+# Package native shared libraries (arm64-v8a: llama.cpp + shadow_brain)
+if [ -d "${APP_DIR}/src/main/jniLibs" ]; then
+    echo "    Packaging native shared libraries (llama.cpp + shadow_brain)..."
+    mkdir -p "${BUILD_DIR}/apk/lib"
+    cp -r "${APP_DIR}/src/main/jniLibs/"* "${BUILD_DIR}/apk/lib/"
+    cd "${BUILD_DIR}/apk"
+    zip -u -r unaligned.apk lib
+    cd - > /dev/null
+fi
+
 echo "[5/6] Aligning APK with zipalign..."
 "${BUILD_TOOLS}/zipalign" -f -p 4 "${BUILD_DIR}/apk/unaligned.apk" "${BUILD_DIR}/apk/aligned.apk"
 
