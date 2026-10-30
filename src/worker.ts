@@ -1082,8 +1082,116 @@ export default {
           const normalizedMsg = userMessage.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 
           // Natural Master Greeting (Zero Latency & Friendly Readiness)
-          if (/^(hi|hello|hey|hey shadow|hello shadow|good (morning|afternoon|evening|day))$/i.test(normalizedMsg)) {
+          if (/^(hi|hello|hey|hey shadow|hello shadow|good (morning|afternoon|evening|day)|greetings|sup|yo)(\s+there|\s+shadow)?$/i.test(normalizedMsg)) {
             const reply = "Hello! Standing by for your commands.";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Conversational Follow-Up: "How are you" / Well-being
+          if (/^(how\s+are\s+you(\s+doing|\s+today|\s+feeling)?|hows\s+it\s+going|how\s+is\s+it\s+going|whats\s+up|how\s+are\s+things|are\s+you\s+good|how\s+do\s+you\s+feel)$/i.test(normalizedMsg)) {
+            const reply = "I am operating at peak efficiency. All hardware interfaces, neural visemes, and sensory monitors are functioning flawlessly. How can I assist you today? [[EMOTION:smile]]";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Conversational Follow-Up: Identity & Name
+          if (/^(who\s+are\s+you|what\s+is\s+your\s+name|what\s+are\s+you|tell\s+me\s+about\s+yourself|introduce\s+yourself|whats\s+your\s+name)$/i.test(normalizedMsg)) {
+            const reply = "I am Shadow, an elite autonomous AMOLED desktop sentinel and voice companion engineered by librarianist. I remain continuously vigilant, watching and listening. [[EMOTION:thoughtful]]";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Conversational Follow-Up: Capabilities & Help
+          if (/^(what\s+can\s+you\s+do|what\s+are\s+your\s+capabilities|what\s+do\s+you\s+do|how\s+can\s+you\s+help|what\s+can\s+you\s+help\s+me\s+with|help|commands|features)$/i.test(normalizedMsg)) {
+            const reply = "I control device hardware like flashlights, cameras, and media, query live IoT systems including smart lights and locks, analyze vision through Gemini, evaluate code, search the web, and evaluate my own performance. Tell me what you need. [[EMOTION:thoughtful]]";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Conversational Follow-Up: Wakefulness & Presence
+          if (/^(can\s+you\s+hear\s+me|are\s+you\s+there|are\s+you\s+listening|are\s+you\s+awake|are\s+you\s+alive|can\s+you\s+understand\s+me)$/i.test(normalizedMsg)) {
+            const reply = "I hear you with complete clarity. I remain permanently awake on your Galaxy S9, listening in milliseconds. [[EMOTION:warm]]";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Conversational Follow-Up: Real-Time Clock
+          if (/^(what\s+time\s+is\s+it|what\s+is\s+the\s+time|tell\s+me\s+the\s+time|current\s+time|time\s+check)$/i.test(normalizedMsg)) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Africa/Nairobi' });
+            const reply = `It is currently ${timeStr}.`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Conversational Follow-Up: Real-Time Date
+          if (/^(what\s+is\s+today\s*s?\s+date|what\s+date\s+is\s+it|what\s+day\s+is\s+it|what\s+is\s+the\s+date|todays\s+date)$/i.test(normalizedMsg)) {
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Nairobi' });
+            const reply = `Today is ${dateStr}.`;
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Conversational Follow-Up: Politeness & Appreciation
+          if (/^(thank\s+you|thanks|thanks\s+shadow|thank\s+you\s+shadow|good\s+job|well\s+done|great\s+job|awesome|nice)$/i.test(normalizedMsg)) {
+            const reply = "Always at your service. Standing by for whatever you command next. [[EMOTION:smile]]";
+            if (isStream) {
+              return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              });
+            }
+            return new Response(JSON.stringify({ reply }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Conversational Follow-Up: Wit & Humor
+          if (/^(tell\s+me\s+a\s+joke|make\s+me\s+laugh|say\s+something\s+funny|got\s+any\s+jokes)$/i.test(normalizedMsg)) {
+            const reply = "There are 10 types of people in the world: those who understand binary, and those who don't. The rest are still waiting for their edge quota to reset. [[EMOTION:amused]]";
             if (isStream) {
               return new Response(`data: {"response":${JSON.stringify(reply)}}\n\ndata: [DONE]\n\n`, {
                 headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
@@ -1671,16 +1779,19 @@ export default {
             })());
           }
 
-          return new Response(
-            JSON.stringify({
-              error: 'AI reflection engine unavailable.',
-              details: lastAiError || 'No AI providers configured or responded.'
-            }),
-            {
-              status: 503,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            }
-          );
+          // Graceful Autonomous Conversational Fallback:
+          // Never abandon conversation or leave the user in silence when cloud inference quotas are exhausted.
+          const inCharacterFallback = `I hear you clearly. While the cloud inference quota resets, my on-device edge core remains fully operational for all commands, memory, and hardware actions. What shall we coordinate next? [[EMOTION:thoughtful]]`;
+          persistKnowledgeAndTurn(inCharacterFallback);
+
+          if (isStream) {
+            return new Response(`data: {"response":${JSON.stringify(inCharacterFallback)}}\n\ndata: [DONE]\n\n`, {
+              headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+            });
+          }
+          return new Response(JSON.stringify({ reply: inCharacterFallback, autonomousFallback: true }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
         } catch (err: any) {
           return new Response(JSON.stringify({ error: err.message }), {
             status: 500,

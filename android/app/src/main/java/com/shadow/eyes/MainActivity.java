@@ -1062,7 +1062,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
             sensorManager.unregisterListener(lightSensorListener);
         }
         if (wakeWordEngine != null) {
-            wakeWordEngine.pause();
+            wakeWordEngine.resume(); // Permanent sentinel vigilance: keep microphone listening across window transitions
         }
         abandonMusicDucking();
     }
@@ -1116,7 +1116,7 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
         public void run() {
             MainActivity activity = activityRef.get();
             if (activity == null) return;
-            boolean ttsHardwareSpeaking = activity.textToSpeech != null && activity.textToSpeech.isSpeaking();
+            boolean ttsHardwareSpeaking = activity.isTtsReady && activity.textToSpeech != null && activity.textToSpeech.isSpeaking();
             if (!ttsHardwareSpeaking && activity.isNativeSpeaking) {
                 android.util.Log.d("ShadowEyes", "[WATCHDOG] Force clearing stuck isNativeSpeaking");
                 activity.activeUtterances = 0;

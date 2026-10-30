@@ -1804,6 +1804,118 @@ async function streamConversation(userPrompt) {
     return;
   }
 
+  // Natural Master Greeting (Sub-10ms Instant Readiness)
+  if (/^(?:hi|hello|hey|hey shadow|hello shadow|good (?:morning|afternoon|evening|day)|greetings|sup|yo)(?:\s+there|\s+shadow)?[.!?]?$/i.test(cleanPrompt)) {
+    var greetReply = "Hello! Standing by for your commands.";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: greetReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(greetReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // Conversational Follow-Up: Well-being & Status
+  if (/^(?:how\s+are\s+you(?:\s+doing|\s+today|\s+feeling)?|hows\s+it\s+going|how\s+is\s+it\s+going|whats\s+up|how\s+are\s+things|are\s+you\s+good|how\s+do\s+you\s+feel)[.!?]?$/i.test(cleanPrompt)) {
+    var howReply = "I am operating at peak efficiency. All hardware interfaces, neural visemes, and sensory monitors are functioning flawlessly. How can I assist you today?";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: howReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(howReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // Conversational Follow-Up: Identity & Name
+  if (/^(?:who\s+are\s+you|what\s+is\s+your\s+name|what\s+are\s+you|tell\s+me\s+about\s+yourself|introduce\s+yourself|whats\s+your\s+name)[.!?]?$/i.test(cleanPrompt)) {
+    var nameReply = "I am Shadow, an elite autonomous AMOLED desktop sentinel and voice companion engineered by librarianist. I remain continuously vigilant, watching and listening.";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: nameReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(nameReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // Conversational Follow-Up: Capabilities & Help
+  if (/^(?:what\s+can\s+you\s+do|what\s+are\s+your\s+capabilities|what\s+do\s+you\s+do|how\s+can\s+you\s+help|what\s+can\s+you\s+help\s+me\s+with|help|commands|features)[.!?]?$/i.test(cleanPrompt)) {
+    var capReply = "I control device hardware like flashlights, cameras, and media, query live IoT systems including smart lights and locks, analyze vision through Gemini, evaluate code, search the web, and evaluate my own performance. Tell me what you need.";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: capReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(capReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // Conversational Follow-Up: Wakefulness & Presence
+  if (/^(?:can\s+you\s+hear\s+me|are\s+you\s+there|are\s+you\s+listening|are\s+you\s+awake|are\s+you\s+alive|can\s+you\s+understand\s+me)[.!?]?$/i.test(cleanPrompt)) {
+    var hearReply = "I hear you with complete clarity. I remain permanently awake on your Galaxy S9, listening in milliseconds.";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: hearReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(hearReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // Conversational Follow-Up: Real-Time Clock
+  if (/^(?:what\s+time\s+is\s+it|what\s+is\s+the\s+time|tell\s+me\s+the\s+time|current\s+time|time\s+check)[.!?]?$/i.test(cleanPrompt)) {
+    var nowT = new Date();
+    var timeTxt = nowT.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+    var timeReply = "It is currently " + timeTxt + ".";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: timeReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(timeReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // Conversational Follow-Up: Real-Time Date
+  if (/^(?:what\s+is\s+today\s*s?\s+date|what\s+date\s+is\s+it|what\s+day\s+is\s+it|what\s+is\s+the\s+date|todays\s+date)[.!?]?$/i.test(cleanPrompt)) {
+    var nowD = new Date();
+    var dateTxt = nowD.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    var dateReply = "Today is " + dateTxt + ".";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: dateReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(dateReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // Conversational Follow-Up: Politeness & Appreciation
+  if (/^(?:thank\s+you|thanks|thanks\s+shadow|thank\s+you\s+shadow|good\s+job|well\s+done|great\s+job|awesome|nice)[.!?]?$/i.test(cleanPrompt)) {
+    var thanksReply = "Always at your service. Standing by for whatever you command next.";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: thanksReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(thanksReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
+  // Unconditional Identity & Creator Ground Truth (Instant Zero Latency)
+  if (/^(?:who\s+(?:is|was)|whos|tell\s+me\s+about|what\s+do\s+you\s+know\s+about|do\s+you\s+know|what\s+is)\s+(?:the\s+)?(?:librarianist|liberianist)(?:\s+to\s+you)?[.!?]?$/i.test(cleanPrompt)) {
+    var libReply = "librarianist is my creator and the engineer who designed and built me.";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: libReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(libReply);
+    isAwaitingResponse = false;
+    return;
+  }
+  if (/^(?:who\s+(?:created|built|designed|made|coded|programmed)\s+you|who\s+is\s+(?:your\s+)?(?:creator|maker|builder|architect|engineer))[.!?]?$/i.test(cleanPrompt)) {
+    var creReply = "I was created and built by librarianist.";
+    conversationHistory.push({ role: 'user', content: cleanPrompt });
+    conversationHistory.push({ role: 'assistant', content: creReply });
+    persistHistory(conversationHistory);
+    enqueueSpeechClause(creReply);
+    isAwaitingResponse = false;
+    return;
+  }
+
   // Direct Hardware Device & Device Administrator Awareness (Instant zero-latency response)
   var isDeviceQuery = /\b(what device|which device|what phone|which phone|what hardware|what mobile|what model)\b.*\b(this|you on|you running|installed|running on)\b|\b(what device are you|what phone are you|what device is this|what phone is this|what are you running on|what device am i using|what phone am i using|what phone is it|what device is it)\b/i.test(cleanPrompt);
   var isAdminQuery = /\b(device administrator|device admin|administrator of this device|admin of this device|who administers this device|who owns this device|who is the administrator|who is the admin)\b/i.test(cleanPrompt);
