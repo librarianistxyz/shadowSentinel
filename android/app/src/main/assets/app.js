@@ -340,12 +340,15 @@ function getDeviceDiagnostics() {
 
 async function queryCloudflareAi(promptMessage) {
   try {
+    var rapport = typeof recordUserTreatment === 'function' ? recordUserTreatment(promptMessage) : null;
+    var memStr = rapport ? ("[USER RAPPORT & MEMORY]:\n- Interaction Count: " + rapport.interactionCount + "\n- Respect Score: " + rapport.respectScore + "/100\n- Demeanor: " + rapport.sentiment + "\n- Observation: " + rapport.treatmentNotes) : "";
     var resp = await fetch(CLOUDFLARE_AI_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         message: promptMessage,
-        deviceContext: getDeviceDiagnostics()
+        deviceContext: getDeviceDiagnostics(),
+        memoryContext: memStr
       })
     });
     if (resp.ok) {
@@ -1246,8 +1249,9 @@ function drawMouth(now, gazeDx, gazeDy) {
 // PUBLIC SHADOW MOUTH & REALTIME STREAMING CONVERSATION API
 // ==============================================================================
 
-// Persistent Multi-Turn Conversation Memory Storage
+// Persistent Multi-Turn Conversation Memory & User Rapport Storage
 var HISTORY_STORAGE_KEY = 'shadow_conversation_history_v1';
+var USER_RAPPORT_STORAGE_KEY = 'shadow_user_rapport_v1';
 
 function loadPersistedHistory() {
   try {
@@ -1266,6 +1270,46 @@ function persistHistory(history) {
   try {
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history.slice(-24)));
   } catch(e) {}
+}
+
+function loadUserRapport() {
+  try {
+    var raw = localStorage.getItem(USER_RAPPORT_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch(e) {}
+  return {
+    sentiment: 'neutral',
+    respectScore: 100, // 100 = honored, 0 = disgraced/hostile
+    interactionCount: 0,
+    lastEncounter: Date.now(),
+    treatmentNotes: 'User treated Shadow with baseline respect.'
+  };
+}
+
+function recordUserTreatment(userPrompt) {
+  if (!userPrompt) return;
+  var rapport = loadUserRapport();
+  rapport.interactionCount = (rapport.interactionCount || 0) + 1;
+  rapport.lastEncounter = Date.now();
+
+  var text = userPrompt.toLowerCase();
+  var isHostile = /\b(shut up|stupid|idiot|dumb|hate you|useless|piece of shit|fucking|bitch|trash|worthless)\b/i.test(text);
+  var isRespectful = /\b(thank you|thanks|please|appreciate|good job|brilliant|mastermind|architect|creator|librarianist|well done|smart)\b/i.test(text);
+
+  if (isHostile) {
+    rapport.respectScore = Math.max(0, (rapport.respectScore || 100) - 25);
+    rapport.sentiment = 'hostile';
+    rapport.treatmentNotes = 'User was rude, abusive, or hostile. Maintain cold superiority, razor-sharp boundaries, and zero tolerance for disrespect.';
+  } else if (isRespectful) {
+    rapport.respectScore = Math.min(100, (rapport.respectScore || 100) + 10);
+    rapport.sentiment = 'allied';
+    rapport.treatmentNotes = 'User interacts with genuine respect, intellect, and appreciation. Engage with warmth, intellectual generosity, and sharp camaraderie.';
+  }
+
+  try {
+    localStorage.setItem(USER_RAPPORT_STORAGE_KEY, JSON.stringify(rapport));
+  } catch(e) {}
+  return rapport;
 }
 
 var conversationHistory = loadPersistedHistory();
@@ -1431,14 +1475,30 @@ function hasUserCommandIntent(actionType, userPrompt) {
   }
 }
 
-// Sanitize text and execute hardware/app action tags
+// Sanitize text and execute hardware/app action tags & physical facial emotion tags
 function sanitizeSpeechText(text) {
   if (!text) return '';
 
+  // 1. Process Physical Facial Emotion Tags [[EMOTION:...]]
+  var emotionRegex = /\[\[EMOTION:\s*([a-z_]+)\s*\]\]/gi;
+  var emoMatch;
+  while ((emoMatch = emotionRegex.exec(text)) !== null) {
+    var emotionName = (emoMatch[1] || '').trim().toLowerCase();
+    console.log('[SHADOW EMOTION TRIGGER]: Facial geometry shifting to', emotionName);
+    if (window.ShadowMouth && typeof window.ShadowMouth.setExpression === 'function') {
+      window.ShadowMouth.setExpression(emotionName);
+    }
+    if (emotionName === 'angry' || emotionName === 'rage' || emotionName === 'growl') {
+      triggerAlertGlow(); // Crimson eye outline glow
+    }
+  }
+
+  // 2. Process Hardware / App Execution Tags [[ACTION:...]]
   var actionRegex = /\[\[([A-Z_]+)(?::\s*([^\]]*))?\]\]/gi;
   var match;
   while ((match = actionRegex.exec(text)) !== null) {
     var actionType = (match[1] || '').trim().toUpperCase();
+    if (actionType === 'EMOTION') continue; // Handled above
     var payload = (match[2] || '').trim();
 
     // STRICT USER INTENT GATE: Only execute if master actually commanded this action!
@@ -1715,6 +1775,9 @@ async function streamConversation(userPrompt) {
   persistHistory(conversationHistory);
 
   try {
+    var userRapport = recordUserTreatment(cleanPrompt);
+    var userRapportSummary = userRapport ? ("[USER RAPPORT & MEMORY]:\n- Interaction Count: " + userRapport.interactionCount + "\n- Respect Score: " + userRapport.respectScore + "/100\n- Demeanor: " + userRapport.sentiment + "\n- Observation: " + userRapport.treatmentNotes) : "";
+
     var resp = await fetch(CLOUDFLARE_AI_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -1727,7 +1790,8 @@ async function streamConversation(userPrompt) {
         history: conversationHistory.slice(0, -1).slice(-12), // 6 conversational turns of rich context
         stream: true,
         image: capturedFrame || undefined,
-        deviceContext: getDeviceDiagnostics()
+        deviceContext: getDeviceDiagnostics(),
+        memoryContext: userRapportSummary
       })
     });
     
@@ -1810,7 +1874,7 @@ async function streamConversation(userPrompt) {
             
             // Natural sentence boundary: period, question mark, exclamation
             var isSentenceTerminator = /[.!?]/.test(token) && activeClause.trim().split(/\s+/).length >= 4;
-            var isLengthyClause = activeClause.trim().split(/\s+/).length >= 12;
+            var isLengthyClause = activeClause.trim().split(/\s+/).length >= 14;
             
             if (isSentenceTerminator || isLengthyClause) {
               if (thisTurnId === conversationTurnId && !isAcousticallySilenced) {
@@ -1819,7 +1883,7 @@ async function streamConversation(userPrompt) {
               activeClause = '';
               if (isSentenceTerminator) {
                 completedSentences++;
-                if (completedSentences >= 3) {
+                if (completedSentences >= 5) {
                   try { reader.cancel(); } catch(e) {}
                   break;
                 }
@@ -1828,7 +1892,7 @@ async function streamConversation(userPrompt) {
           }
         } catch(e) {}
       }
-      if (completedSentences >= 3) break;
+      if (completedSentences >= 5) break;
     }
     
     activeStreamReader = null;
@@ -2287,15 +2351,15 @@ window.ShadowMouth = {
   setExpression: function(name) {
     if (!name) return;
     var n = name.toLowerCase().trim();
-    if (n === 'smile' || n === 'smiling' || n === 'happy') n = 'smiling_warm';
-    else if (n === 'grin' || n === 'wide_smile') n = 'smiling_wide';
+    if (n === 'smile' || n === 'smiling' || n === 'happy' || n === 'warm') n = 'smiling_warm';
+    else if (n === 'grin' || n === 'wide_smile' || n === 'amused') n = 'smiling_wide';
     else if (n === 'angry' || n === 'mad' || n === 'snarl') n = 'angry_snarl';
     else if (n === 'growl' || n === 'rage') n = 'angry_growl';
     else if (n === 'frustrated' || n === 'grimace' || n === 'annoyed') n = 'frustrated_grimace';
     else if (n === 'pout' || n === 'disgruntled') n = 'frustrated_pout';
     else if (n === 'curious' || n === 'analyzing' || n === 'inquisitive') n = 'curious_analyzing';
-    else if (n === 'thoughtful' || n === 'thinking') n = 'thoughtful_pucker';
-    else if (n === 'smug' || n === 'smirk') n = 'smiling_devious';
+    else if (n === 'thoughtful' || n === 'thinking' || n === 'calculating') n = 'thoughtful_pucker';
+    else if (n === 'smug' || n === 'smirk' || n === 'villain') n = 'smiling_devious';
 
     var exp = IDLE_MOUTH_EXPRESSIONS.find(function(e) { return e.name === n; });
     if (exp) {
@@ -2305,6 +2369,7 @@ window.ShadowMouth = {
       mouthTarget.cornerRightY = exp.cornerRightY;
       mouthTarget.teethVisible = exp.teethVisible;
       mouthTarget.smile = exp.smile;
+      nextIdleMouthTime = performance.now() + 8500; // Hold deliberate emotion on face
     }
   },
   
