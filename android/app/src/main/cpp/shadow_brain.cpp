@@ -285,3 +285,4 @@ Java_com_shadow_eyes_ShadowBrain_nativeRelease(
 }
 
 } // extern "C"
+
