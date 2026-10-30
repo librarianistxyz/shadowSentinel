@@ -712,6 +712,24 @@ function render(now) {
   requestAnimationFrame(render);
 }
 
+function getContourYRange(contour, targetX) {
+  var minY = 999;
+  var maxY = -999;
+  for (var i = 0; i < contour.length; i++) {
+    var p1 = contour[i];
+    var p2 = contour[(i + 1) % contour.length];
+    var minSegX = Math.min(p1[0], p2[0]);
+    var maxSegX = Math.max(p1[0], p2[0]);
+    if (targetX >= minSegX && targetX <= maxSegX && minSegX !== maxSegX) {
+      var t = (targetX - p1[0]) / (p2[0] - p1[0]);
+      var y = p1[1] + t * (p2[1] - p1[1]);
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return { minY: minY, maxY: maxY };
+}
+
 function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, now, isLeftEye) {
   ctx.save();
 
@@ -830,56 +848,88 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
   ctx.fillStyle = shadowGrad;
   ctx.fillRect(minX - 5, minY - 5, eyeWidth + 10, shadowDepth + 5);
 
-  // 5. Primary Specular Catchlight (gleaming on top of shadow so the inner white dot is ALWAYS gleaming)
-  // Shifts subtly forward/center when listening intently in PTT/speech
+  // 5. Cognitive Eyelid Shaping:
+  // - Focused Listening: parts eyelids by +5% (wider focused attention)
+  // - Thinking / Edge Querying: squints into calculating slits
+  // - Slumber: hooded +0.74
+  // - Natural blink: +blinkProgress
+  var listeningLidOffset = -0.05 * listeningFocusProgress;
+  var thinkingSquintUpper = 0.28 * thinkingSquintProgress;
+  var effectiveLid = Math.max(0.0, Math.min(1.0, blink + slumberProgress * 0.74 + thinkingSquintUpper + listeningLidOffset));
+
+  var currentLidY = minY;
+  if (effectiveLid > 0.01) {
+    currentLidY = minY + (maxY - minY + 10) * effectiveLid;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(minX - 10, minY - 10, eyeWidth + 20, currentLidY - minY + 10);
+  }
+
+  // Lower calculating squint lid (thinking state narrow calculating slit)
+  if (thinkingSquintProgress > 0.02) {
+    var lowerSquintH = eyeHeight * 0.14 * thinkingSquintProgress;
+    var lowerSquintY = maxY - lowerSquintH;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(minX - 10, lowerSquintY, eyeWidth + 20, lowerSquintH + 10);
+  }
+
+  // 6. Primary Specular Catchlight (gleaming on top of shadow and lid so the inner white dot is ALWAYS gleaming)
+  // Firmly anchored to pupilX and pupilY so it moves in 1:1 lockstep with the black small eyeball
   var catchShiftX = 1.2 * listeningFocusProgress;
   var catchShiftY = 0.8 * listeningFocusProgress;
-  var catchX = pupilX + curPupilRadius * 0.35 - catchShiftX;
-  var catchOffsetY = (curGazeDy < 0) ? (curPupilRadius * 0.12) : (curPupilRadius * 0.25);
+  var catchOffsetX = curPupilRadius * 0.28;
+  var catchOffsetY = (curGazeDy < 0) ? (curPupilRadius * 0.08) : (curPupilRadius * 0.18);
+  var catchX = pupilX + catchOffsetX - catchShiftX;
   var catchY = pupilY - catchOffsetY + catchShiftY;
 
-  // Local upper lid boundary guard: ensure catchlight is safely below the upper contour edge
-  var localTopY = 999;
-  for (var i = 0; i < contour.length; i++) {
-    if (Math.abs(contour[i][0] - catchX) < 8) {
-      if (contour[i][1] < localTopY) {
-        localTopY = contour[i][1];
-      }
+  // Horizontal socket boundary constraint with safety margin
+  catchX = Math.max(minX + 3.5, Math.min(maxX - 3.5, catchX));
+
+  // Exact vertical socket contour clamping: ensures catchY stays inside eye opening and visible on the pupil
+  var range = getContourYRange(contour, catchX);
+  if (range.minY < 900 && range.maxY > -900) {
+    var upperLimit = range.minY + 2.5;
+    if (effectiveLid > 0.01 && effectiveLid < 0.88) {
+      upperLimit = Math.max(upperLimit, currentLidY + 1.8);
+    }
+    var lowerLimit = range.maxY - 2.5;
+    if (lowerLimit > upperLimit) {
+      catchY = Math.max(upperLimit, Math.min(lowerLimit, catchY));
     }
   }
-  if (localTopY < 900 && catchY < localTopY + 3.8) {
-    catchY = localTopY + 3.8;
+
+  // Fade smoothly only when fully closed in a blink; stays vibrant and gleaming during open/hooded states
+  var blinkFade = Math.max(0.0, 1.0 - Math.max(0.0, (blink - 0.70) / 0.30));
+  var catchAlpha = blinkFade * Math.max(0.18, slumberAlpha * (isSentinelLockdown ? 0.35 : 1.0));
+
+  if (catchAlpha > 0.01) {
+    // Soft radiant bloom around specular catchlight
+    var bloomGrad = ctx.createRadialGradient(catchX, catchY, 0.5, catchX, catchY, 4.8);
+    bloomGrad.addColorStop(0, 'rgba(255, 255, 255, ' + (catchAlpha * 0.95) + ')');
+    bloomGrad.addColorStop(0.55, 'rgba(255, 255, 255, ' + (catchAlpha * 0.55) + ')');
+    bloomGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.beginPath();
+    ctx.arc(catchX, catchY, 4.8, 0, Math.PI * 2);
+    ctx.fillStyle = bloomGrad;
+    ctx.fill();
+
+    // Solid bright core catchlight (the signature white dot)
+    ctx.beginPath();
+    ctx.arc(catchX, catchY, 2.7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + catchAlpha + ')';
+    ctx.fill();
+
+    // Secondary soft specular sheen (gives depth and life to the pupil)
+    ctx.beginPath();
+    ctx.arc(catchX - 3.0, catchY + 2.6, 1.4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + (catchAlpha * 0.70) + ')';
+    ctx.fill();
+
+    // Tertiary curious analytical micro-glint
+    ctx.beginPath();
+    ctx.arc(catchX + 2.4, catchY + 3.4, 0.9, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + (catchAlpha * 0.50) + ')';
+    ctx.fill();
   }
-
-  var catchAlpha = Math.max(0.15, slumberAlpha * (isSentinelLockdown ? 0.32 : 1.0));
-
-  // Soft radiant bloom around specular catchlight
-  var bloomGrad = ctx.createRadialGradient(catchX, catchY, 0.5, catchX, catchY, 4.8);
-  bloomGrad.addColorStop(0, 'rgba(255, 255, 255, ' + (catchAlpha * 0.95) + ')');
-  bloomGrad.addColorStop(0.55, 'rgba(255, 255, 255, ' + (catchAlpha * 0.55) + ')');
-  bloomGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  ctx.beginPath();
-  ctx.arc(catchX, catchY, 4.8, 0, Math.PI * 2);
-  ctx.fillStyle = bloomGrad;
-  ctx.fill();
-
-  // Solid bright core catchlight
-  ctx.beginPath();
-  ctx.arc(catchX, catchY, 2.7, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 255, 255, ' + catchAlpha + ')';
-  ctx.fill();
-
-  // Secondary soft specular sheen (gives depth and life to the pupil)
-  ctx.beginPath();
-  ctx.arc(catchX - 3.2, catchY + 2.8, 1.4, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 255, 255, ' + (catchAlpha * 0.70) + ')';
-  ctx.fill();
-
-  // Tertiary curious analytical micro-glint
-  ctx.beginPath();
-  ctx.arc(catchX + 2.5, catchY + 3.8, 0.9, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 255, 255, ' + (catchAlpha * 0.50) + ')';
-  ctx.fill();
 
   // =========================================================================
   // EMOTIONAL TEARY EYE RENDERING (Glistening Tear Sheen & Liquid Droplets)
@@ -903,29 +953,6 @@ function drawSingleEye(contour, restPupil, pupilRadius, gazeDx, gazeDy, blink, n
     ctx.ellipse(pupilX, pupilY + pupilRadius * 0.45, pupilRadius * 0.85, pupilRadius * 0.45, 0, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(180, 225, 255, ' + (0.28 * emotionalLevel * (0.8 + 0.2 * Math.sin(now * 0.005))) + ')';
     ctx.fill();
-  }
-
-  // 5. Cognitive Eyelid Shaping:
-  // - Focused Listening: parts eyelids by +5% (wider focused attention)
-  // - Thinking / Edge Querying: squints into calculating slits
-  // - Slumber: hooded +0.74
-  // - Natural blink: +blinkProgress
-  var listeningLidOffset = -0.05 * listeningFocusProgress;
-  var thinkingSquintUpper = 0.28 * thinkingSquintProgress;
-  var effectiveLid = Math.max(0.0, Math.min(1.0, blink + slumberProgress * 0.74 + thinkingSquintUpper + listeningLidOffset));
-
-  if (effectiveLid > 0.01) {
-    var currentLidY = minY + (maxY - minY + 10) * effectiveLid;
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(minX - 10, minY - 10, eyeWidth + 20, currentLidY - minY + 10);
-  }
-
-  // Lower calculating squint lid (thinking state narrow calculating slit)
-  if (thinkingSquintProgress > 0.02) {
-    var lowerSquintH = eyeHeight * 0.14 * thinkingSquintProgress;
-    var lowerSquintY = maxY - lowerSquintH;
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(minX - 10, lowerSquintY, eyeWidth + 20, lowerSquintH + 10);
   }
 
   // 6. Glistening Tear Meniscus along the Lower Eyelid Rim
