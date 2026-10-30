@@ -31,6 +31,28 @@ public class ShadowBridge {
     }
 
     @JavascriptInterface
+    public void setVoiceGender(String gender) {
+        if (activity != null) {
+            activity.setVoiceGender(gender);
+        }
+    }
+
+    @JavascriptInterface
+    public void setVoiceEmotion(String emotion) {
+        if (activity != null) {
+            activity.setVoiceEmotion(emotion);
+        }
+    }
+
+    @JavascriptInterface
+    public String getVoiceGender() {
+        if (activity != null) {
+            return activity.currentVoiceGender;
+        }
+        return "male";
+    }
+
+    @JavascriptInterface
     public void stopSpeaking() {
         if (activity != null) {
             activity.stopSpeaking();

@@ -1475,30 +1475,65 @@ function hasUserCommandIntent(actionType, userPrompt) {
   }
 }
 
+// Current Dynamic Vocal Personality State
+var currentVoiceGender = 'male'; // 'male' (baritone) or 'female' (siren)
+var currentVoiceEmotion = 'neutral';
+
 // Sanitize text and execute hardware/app action tags & physical facial emotion tags
 function sanitizeSpeechText(text) {
   if (!text) return '';
 
-  // 1. Process Physical Facial Emotion Tags [[EMOTION:...]]
+  // 1. Process Physical Facial Emotion Tags [[EMOTION:...]] & Voice Gender Modulation
   var emotionRegex = /\[\[EMOTION:\s*([a-z_]+)\s*\]\]/gi;
   var emoMatch;
   while ((emoMatch = emotionRegex.exec(text)) !== null) {
     var emotionName = (emoMatch[1] || '').trim().toLowerCase();
     console.log('[SHADOW EMOTION TRIGGER]: Facial geometry shifting to', emotionName);
+    currentVoiceEmotion = emotionName;
+
+    // Emotion-Driven Dynamic Voice Gender Switching:
+    // Warmth, playful teasing, seductive intrigue, or joy -> Siren (Female)
+    // Stoic, dark humor, calculation, logic, frustration, or rage -> Sovereign Baritone (Male)
+    if (emotionName === 'smile' || emotionName === 'smiling' || emotionName === 'warm' || emotionName === 'amused' || emotionName === 'happy') {
+      currentVoiceGender = 'female';
+    } else if (emotionName === 'angry' || emotionName === 'rage' || emotionName === 'growl' || emotionName === 'smug' || emotionName === 'thoughtful' || emotionName === 'frustrated') {
+      currentVoiceGender = 'male';
+    }
+
     if (window.ShadowMouth && typeof window.ShadowMouth.setExpression === 'function') {
       window.ShadowMouth.setExpression(emotionName);
+    }
+    if (window.ShadowNative && typeof window.ShadowNative.setVoiceGender === 'function') {
+      window.ShadowNative.setVoiceGender(currentVoiceGender);
+      window.ShadowNative.setVoiceEmotion(emotionName);
     }
     if (emotionName === 'angry' || emotionName === 'rage' || emotionName === 'growl') {
       triggerAlertGlow(); // Crimson eye outline glow
     }
   }
 
-  // 2. Process Hardware / App Execution Tags [[ACTION:...]]
+  // 2. Process Explicit Voice Switch Tags [[VOICE:MALE]] or [[VOICE:FEMALE]]
+  var voiceRegex = /\[\[VOICE:\s*([A-Z]+)\s*\]\]/gi;
+  var voiceMatch;
+  while ((voiceMatch = voiceRegex.exec(text)) !== null) {
+    var requestedGender = (voiceMatch[1] || '').trim().toLowerCase();
+    if (requestedGender === 'female' || requestedGender === 'woman') {
+      currentVoiceGender = 'female';
+    } else {
+      currentVoiceGender = 'male';
+    }
+    console.log('[VOICE GENDER OVERRIDE]: Switched to', currentVoiceGender);
+    if (window.ShadowNative && typeof window.ShadowNative.setVoiceGender === 'function') {
+      window.ShadowNative.setVoiceGender(currentVoiceGender);
+    }
+  }
+
+  // 3. Process Hardware / App Execution Tags [[ACTION:...]]
   var actionRegex = /\[\[([A-Z_]+)(?::\s*([^\]]*))?\]\]/gi;
   var match;
   while ((match = actionRegex.exec(text)) !== null) {
     var actionType = (match[1] || '').trim().toUpperCase();
-    if (actionType === 'EMOTION') continue; // Handled above
+    if (actionType === 'EMOTION' || actionType === 'VOICE') continue; // Handled above
     var payload = (match[2] || '').trim();
 
     // STRICT USER INTENT GATE: Only execute if master actually commanded this action!
@@ -2218,7 +2253,9 @@ async function playNeuralSpeechWithFallback(text, utteranceId, onComplete) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text: text,
-        whisper: isDark
+        whisper: isDark,
+        gender: currentVoiceGender,
+        emotion: currentVoiceEmotion
       }),
       signal: controller.signal
     });

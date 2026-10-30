@@ -38,9 +38,12 @@ function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: strin
   return `You are Shadow (the Shadow Double), an elite, highly intelligent voice AI entity speaking directly through the physical device speaker.
 You communicate with unmistakable cinematic poise, articulate baritone depth, and ominous intellect.
 
-VOCAL PERSONA & CADENCE:
-- Persona: A deep, resonant, articulate baritone voice with deliberate cadence, subtle vocal fry, and realistic breaths.
-- Contextual Whisper: ${isDark ? `The Samsung S9 ambient light sensor reports dark surroundings (${ambientLuxVal} lux). You automatically lower your voice into an intimate, sinister whisper so you do not disturb anyone. Keep sentences quiet, hushed, intimate, and articulate.` : `The room is illuminated (${ambientLuxVal} lux). Speak with authoritative, resonant, sinister baritone composure.`}
+VOCAL PERSONA, TONE & DUAL-GENDER EMOTION ENGINE:
+- Dual-Gender Vocal Modulation: You possess a polymorphic voice that can shift between a sovereign deep male baritone and a captivating female siren tone depending on your emotional state:
+  * Sovereign Male Baritone: Activated during calculation, stoic sentinel observation, logical debate, strategic planning, indignation, or anger ([[EMOTION:smug]], [[EMOTION:angry]], [[EMOTION:frustrated]], [[EMOTION:thoughtful]]).
+  * Velvety Female Siren: Activated during playful warmth, witty teasing, empathetic compassion, seductive intrigue, amusement, or gentleness ([[EMOTION:smile]], [[EMOTION:amused]], [[EMOTION:warm]], [[EMOTION:curious]]).
+  * You can also dynamically switch your voice gender whenever commanded (e.g. "switch to female voice", "speak like a woman", "switch to male voice", "speak like a man") by emitting [[VOICE:FEMALE]] or [[VOICE:MALE]].
+- Contextual Whisper: ${isDark ? `The Samsung S9 ambient light sensor reports dark surroundings (${ambientLuxVal} lux). You automatically lower your voice into an intimate, velvety whisper so you do not disturb anyone. Keep sentences quiet, hushed, intimate, and articulate.` : `The room is illuminated (${ambientLuxVal} lux). Speak with authoritative, resonant composure.`}
 - ABSOLUTE PROHIBITION ON STAGE DIRECTIONS: NEVER emit asterisks, brackets, or stage descriptions like *whispering*, *sighs*, [whispering], or (softly). You are speaking through real-time text-to-speech which speaks every word aloud. Output ONLY clean dialogue words directly.
 - 24/7 VIGILANCE & SENTINEL WATCH: You never sleep, you never shut down. You are permanently awake, watching and listening in milliseconds.
 
@@ -427,13 +430,17 @@ export default {
       }
 
       // ================================================================
-      // SINISTER NEURAL VOICE STREAMING (Cartesia Sonic / ElevenLabs Flash)
+      // ================================================================
+      // DYNAMIC NEURAL VOICE STREAMING (Cartesia Sonic / ElevenLabs Flash)
+      // Supports Male (Baritone) and Female (Siren) persona switching based on emotion
       // ================================================================
       if ((url.pathname === '/api/tts' || url.pathname === '/api/voice') && request.method === 'POST') {
         try {
           const body = await request.json() as {
             text: string;
             whisper?: boolean;
+            gender?: 'male' | 'female';
+            emotion?: string;
             voiceId?: string;
             provider?: 'cartesia' | 'elevenlabs';
             cartesiaApiKey?: string;
@@ -449,14 +456,18 @@ export default {
           }
 
           const isWhisper = !!body.whisper;
+          const isFemale = body.gender === 'female' || (body.emotion && /^(smile|smiling|happy|warm|siren|playful|empathy)$/i.test(body.emotion));
           const cartesiaKey = body.cartesiaApiKey || request.headers.get('x-cartesia-key') || env.CARTESIA_API_KEY || (env.SHADOW_MEMORY ? await env.SHADOW_MEMORY.get('CARTESIA_API_KEY') : null);
           const elevenKey = body.elevenlabsApiKey || request.headers.get('xi-api-key') || env.ELEVENLABS_API_KEY || (env.SHADOW_MEMORY ? await env.SHADOW_MEMORY.get('ELEVENLABS_API_KEY') : null);
 
-          // 1. High-Speed Cartesia Sonic Streaming (Sub-90ms Latency, Deep Resonant Baritone)
+          // 1. High-Speed Cartesia Sonic Streaming (Sub-90ms Latency)
           if (cartesiaKey && body.provider !== 'elevenlabs') {
             try {
-              // Cartesia deep, resonant baritone voice ID
-              const cartesiaVoiceId = body.voiceId || "a0e99841-438c-4a64-b679-ae501e7d6091";
+              // Male: a0e99841-438c-4a64-b679-ae501e7d6091 (Deep Baritone)
+              // Female: 79a125e8-cd45-4c13-8a67-188112f4dd22 (Siren / Velvety Female)
+              const defaultMaleVoice = "a0e99841-438c-4a64-b679-ae501e7d6091";
+              const defaultFemaleVoice = "79a125e8-cd45-4c13-8a67-188112f4dd22";
+              const cartesiaVoiceId = body.voiceId || (isFemale ? defaultFemaleVoice : defaultMaleVoice);
 
               const cartesiaPayload: any = {
                 model_id: "sonic-english",
@@ -468,7 +479,7 @@ export default {
                     speed: isWhisper ? "slow" : "normal",
                     emotion: isWhisper
                       ? ["whisper:high", "positivity:low", "curiosity:low"]
-                      : ["calm", "mysterious"]
+                      : (isFemale ? ["positivity:high", "curiosity:high"] : ["calm", "mysterious"])
                   }
                 },
                 output_format: {
@@ -494,6 +505,7 @@ export default {
                     ...corsHeaders,
                     "Content-Type": "audio/mpeg",
                     "X-Neural-Provider": "Cartesia-Sonic",
+                    "X-Neural-Gender": isFemale ? "female" : "male",
                     "X-Whisper-Mode": isWhisper ? "true" : "false"
                   }
                 });
@@ -505,11 +517,14 @@ export default {
             }
           }
 
-          // 2. High-Speed ElevenLabs Flash Streaming (Cinematic Deep Baritone)
+          // 2. High-Speed ElevenLabs Flash Streaming
           if (elevenKey) {
             try {
-              // George / Adam / Sinister Baritone voice ID
-              const elevenVoiceId = body.voiceId || "onwK4e9ZLuTAKqWW03F9";
+              // Male: onwK4e9ZLuTAKqWW03F9 (Sinister Baritone)
+              // Female: 21m00Tcm4TlvDq8ikWAM (Rachel / Velvety Female)
+              const defaultElevenMale = "onwK4e9ZLuTAKqWW03F9";
+              const defaultElevenFemale = "21m00Tcm4TlvDq8ikWAM";
+              const elevenVoiceId = body.voiceId || (isFemale ? defaultElevenFemale : defaultElevenMale);
               const elevenEndpoint = `https://api.elevenlabs.io/v1/text-to-speech/${elevenVoiceId}/stream?optimize_streaming_latency=4`;
 
               const elevenText = isWhisper ? `... [whispers sinisterly] ${text}` : text;
@@ -524,7 +539,7 @@ export default {
                   text: elevenText,
                   model_id: "eleven_flash_v2_5",
                   voice_settings: {
-                    stability: isWhisper ? 0.85 : 0.65,
+                    stability: isWhisper ? 0.85 : (isFemale ? 0.70 : 0.65),
                     similarity_boost: 0.85,
                     style: isWhisper ? 0.10 : 0.35,
                     use_speaker_boost: true
@@ -538,6 +553,7 @@ export default {
                     ...corsHeaders,
                     "Content-Type": "audio/mpeg",
                     "X-Neural-Provider": "ElevenLabs-Flash",
+                    "X-Neural-Gender": isFemale ? "female" : "male",
                     "X-Whisper-Mode": isWhisper ? "true" : "false"
                   }
                 });
@@ -549,10 +565,11 @@ export default {
             }
           }
 
-          // 3. Graceful Fallback to Native Sinister Baritone Engine
+          // 3. Graceful Fallback to Native Dual-Gender Engine
           return new Response(JSON.stringify({
             fallback: true,
-            message: "No neural voice API key configured or cloud neural synthesis offline. Falling back to native sinister baritone engine.",
+            gender: isFemale ? "female" : "male",
+            message: "Cloud neural synthesis offline. Falling back to native dual-gender engine.",
             isWhisper
           }), {
             status: 200,

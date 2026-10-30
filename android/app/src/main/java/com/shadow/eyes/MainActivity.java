@@ -52,7 +52,29 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
     ShadowLightSensorListener lightSensorListener;
     public volatile float currentLux = 50.0f;
     public volatile boolean isDarkRoom = false;
+    public volatile String currentVoiceGender = "male"; // "male" (baritone) or "female" (siren)
+    public volatile String currentEmotion = "neutral";
+    public android.speech.tts.Voice maleVoice = null;
+    public android.speech.tts.Voice femaleVoice = null;
     final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    public void setVoiceGender(String gender) {
+        if (gender == null) return;
+        String g = gender.trim().toLowerCase(Locale.US);
+        if (g.contains("woman") || g.contains("female") || g.contains("girl")) {
+            currentVoiceGender = "female";
+            android.util.Log.i("ShadowEyes", "[VOICE PERSONALITY] Persona active: FEMALE (The Siren)");
+        } else {
+            currentVoiceGender = "male";
+            android.util.Log.i("ShadowEyes", "[VOICE PERSONALITY] Persona active: MALE (The Sovereign Baritone)");
+        }
+    }
+
+    public void setVoiceEmotion(String emotion) {
+        if (emotion == null) return;
+        currentEmotion = emotion.trim().toLowerCase(Locale.US);
+        android.util.Log.i("ShadowEyes", "[VOICE EMOTION] Emotional tone updated: " + currentEmotion);
+    }
 
     private static final int PERMISSION_REQ_CODE = 442;
     private static final String[] REQUIRED_PERMISSIONS = {
@@ -398,59 +420,79 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     } catch (Exception ignored) {}
                 }
 
-                // Intelligently select the highest-fidelity, smoothest sweet voice
+                // Intelligently select the highest-fidelity Male and Female voices for dynamic emotion switching
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     try {
                         java.util.Set<android.speech.tts.Voice> voices = activity.textToSpeech.getVoices();
                         if (voices != null && !voices.isEmpty()) {
-                            android.speech.tts.Voice bestVoice = null;
-                            int bestScore = -1;
+                            android.speech.tts.Voice bestMale = null;
+                            android.speech.tts.Voice bestFemale = null;
+                            int bestMaleScore = -1;
+                            int bestFemaleScore = -1;
 
                             for (android.speech.tts.Voice v : voices) {
                                 Locale loc = v.getLocale();
                                 if (loc == null || !loc.getLanguage().equals("en")) continue;
 
-                                int score = 0;
+                                int baseScore = 0;
                                 String name = v.getName().toLowerCase(Locale.US);
 
                                 // Prefer US or GB English
                                 if (loc.getCountry().equalsIgnoreCase("US")) {
-                                    score += 150;
+                                    baseScore += 150;
                                 } else if (loc.getCountry().equalsIgnoreCase("GB")) {
-                                    score += 100;
+                                    baseScore += 100;
                                 }
 
                                 // Prioritize studio-grade high fidelity quality
                                 if (v.getQuality() == android.speech.tts.Voice.QUALITY_VERY_HIGH) {
-                                    score += 350;
+                                    baseScore += 350;
                                 } else if (v.getQuality() == android.speech.tts.Voice.QUALITY_HIGH) {
-                                    score += 250;
+                                    baseScore += 250;
                                 } else if (v.getQuality() == android.speech.tts.Voice.QUALITY_NORMAL) {
-                                    score += 50;
+                                    baseScore += 50;
                                 }
 
-                                // Sinister Persona: Strongly penalize high/female voices, prioritize deep baritone male voices
-                                if (name.contains("female") || name.contains("woman") || name.contains("girl")) {
-                                    score -= 600;
-                                }
-                                if (name.contains("male") || name.contains("baritone") || name.contains("deep") || name.contains("man") || name.contains("rjs") || name.contains("iom") || name.contains("iob") || name.contains("iog") || name.contains("en-us-x-sfg") || name.contains("en-gb-x-rjs")) {
-                                    score += 450;
-                                }
-
-                                // Prefer offline local voices for zero network stutter
                                 if (!v.isNetworkConnectionRequired()) {
-                                    score += 100;
+                                    baseScore += 100;
                                 }
 
-                                if (score > bestScore) {
-                                    bestScore = score;
-                                    bestVoice = v;
+                                // 1. Male Baritone Persona Scoring
+                                int mScore = baseScore;
+                                if (name.contains("female") || name.contains("woman") || name.contains("girl")) {
+                                    mScore -= 600;
+                                }
+                                if (name.contains("male") || name.contains("baritone") || name.contains("deep") || name.contains("man") || name.contains("rjs") || name.contains("iom") || name.contains("en-us-x-sfg") || name.contains("en-gb-x-rjs")) {
+                                    mScore += 450;
+                                }
+                                if (mScore > bestMaleScore) {
+                                    bestMaleScore = mScore;
+                                    bestMale = v;
+                                }
+
+                                // 2. Female Siren Persona Scoring
+                                int fScore = baseScore;
+                                if (name.contains("male") || name.contains("baritone") || name.contains("deep") || name.contains("man")) {
+                                    fScore -= 600;
+                                }
+                                if (name.contains("female") || name.contains("woman") || name.contains("girl") || name.contains("tpd") || name.contains("iob") || name.contains("fis") || name.contains("female") || name.contains("en-us-x-tpd") || name.contains("en-us-x-iob")) {
+                                    fScore += 450;
+                                }
+                                if (fScore > bestFemaleScore) {
+                                    bestFemaleScore = fScore;
+                                    bestFemale = v;
                                 }
                             }
 
-                            if (bestVoice != null) {
-                                android.util.Log.i("ShadowEyes", "[VOICE] Selected sinister deep baritone voice: " + bestVoice.getName() + " (Score: " + bestScore + ")");
-                                activity.textToSpeech.setVoice(bestVoice);
+                            activity.maleVoice = bestMale;
+                            activity.femaleVoice = bestFemale;
+
+                            if (activity.maleVoice != null) {
+                                android.util.Log.i("ShadowEyes", "[VOICE PERSONALITY] Selected Male Baritone Voice: " + activity.maleVoice.getName() + " (Score: " + bestMaleScore + ")");
+                                activity.textToSpeech.setVoice(activity.maleVoice);
+                            }
+                            if (activity.femaleVoice != null) {
+                                android.util.Log.i("ShadowEyes", "[VOICE PERSONALITY] Selected Female Siren Voice: " + activity.femaleVoice.getName() + " (Score: " + bestFemaleScore + ")");
                             }
                         }
                     } catch (Exception e) {
@@ -1153,18 +1195,42 @@ public class MainActivity extends Activity implements SentinelCamera.SentinelLis
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         Bundle ttsParams = new Bundle();
-                        if (activity.isDarkRoom) {
-                            // Contextual Whisper in dark room: intimate, sinister, quiet whisper
-                            activity.textToSpeech.setPitch(0.70f);
-                            activity.textToSpeech.setSpeechRate(0.84f);
-                            ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.32f);
-                            android.util.Log.i("ShadowEyes", "[CONTEXTUAL WHISPER] Dark room (" + activity.currentLux + " lx) - intimate whisper volume/pitch active");
+                        boolean isFemale = "female".equalsIgnoreCase(activity.currentVoiceGender);
+
+                        if (isFemale) {
+                            if (activity.femaleVoice != null) {
+                                activity.textToSpeech.setVoice(activity.femaleVoice);
+                            }
+                            if (activity.isDarkRoom) {
+                                // Contextual Siren Whisper in dark room: intimate, velvety, quiet female whisper
+                                activity.textToSpeech.setPitch(1.02f);
+                                activity.textToSpeech.setSpeechRate(0.86f);
+                                ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.32f);
+                                android.util.Log.i("ShadowEyes", "[VOICE PERSONALITY: FEMALE WHISPER] Intimate feminine whisper (" + activity.currentLux + " lx)");
+                            } else {
+                                // Silky, articulate feminine delivery
+                                activity.textToSpeech.setPitch(1.15f);
+                                activity.textToSpeech.setSpeechRate(0.92f);
+                                ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.90f);
+                                android.util.Log.i("ShadowEyes", "[VOICE PERSONALITY: FEMALE] Silky feminine vocal delivery (" + activity.currentLux + " lx)");
+                            }
                         } else {
-                            // Illuminated room: deep resonant baritone
-                            activity.textToSpeech.setPitch(0.78f);
-                            activity.textToSpeech.setSpeechRate(0.88f);
-                            ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.90f);
-                            android.util.Log.i("ShadowEyes", "[SINISTER BARITONE] Resonant baritone delivery (" + activity.currentLux + " lx)");
+                            if (activity.maleVoice != null) {
+                                activity.textToSpeech.setVoice(activity.maleVoice);
+                            }
+                            if (activity.isDarkRoom) {
+                                // Contextual Whisper in dark room: intimate, sinister, quiet baritone whisper
+                                activity.textToSpeech.setPitch(0.70f);
+                                activity.textToSpeech.setSpeechRate(0.84f);
+                                ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.32f);
+                                android.util.Log.i("ShadowEyes", "[VOICE PERSONALITY: MALE WHISPER] Intimate baritone whisper (" + activity.currentLux + " lx)");
+                            } else {
+                                // Illuminated room: deep resonant baritone
+                                activity.textToSpeech.setPitch(0.78f);
+                                activity.textToSpeech.setSpeechRate(0.88f);
+                                ttsParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.90f);
+                                android.util.Log.i("ShadowEyes", "[VOICE PERSONALITY: MALE] Resonant baritone delivery (" + activity.currentLux + " lx)");
+                            }
                         }
                         activity.textToSpeech.speak(clean, TextToSpeech.QUEUE_ADD, ttsParams, this.utteranceId);
                     } else {
