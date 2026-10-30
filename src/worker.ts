@@ -14,7 +14,7 @@ export interface Env {
   ELEVENLABS_API_KEY?: string;
 }
 
-function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: string, deviceContext?: any): string {
+function buildHumanizedSystemPrompt(storedMemory?: string, liveGrounding?: string, deviceContext?: any, pinnedKnowledge?: string): string {
   const now = new Date();
   
   const dayName = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Africa/Nairobi' });
@@ -156,6 +156,7 @@ CONVERSATIONAL & COGNITIVE REASONING ENGINE (HUMAN-LIKE INTELLIGENCE):
      * Deliver the synthesized answer in natural spoken sentences without raw URLs.
 
 ${liveGrounding ? `[VERIFIED REAL-TIME DATA & CRAWLED SOURCES]:\n${liveGrounding}\n` : ''}
+${pinnedKnowledge ? `[PINNED KNOWLEDGE BASE & RECENT IDEAS]:\n${pinnedKnowledge}\n` : ''}
 ${storedMemory ? `[USER MEMORY & CONTEXT]:\n${storedMemory}` : ''}`;
 }
 
@@ -429,6 +430,55 @@ export default {
         }
       }
 
+      // Knowledge Base & Pinned Ideas Feeder Endpoint (GET / POST)
+      // Allows autonomous crawlers, scripts, or edge workers to pin fresh world intelligence
+      if (url.pathname === '/api/knowledge') {
+        if (request.method === 'GET') {
+          let knowledge = '';
+          if (env.SHADOW_MEMORY) {
+            knowledge = (await env.SHADOW_MEMORY.get('pinned_knowledge_base')) || '';
+          }
+          return new Response(JSON.stringify({ knowledge }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        if (request.method === 'POST') {
+          const body = await request.json() as { 
+            topic?: string; 
+            content: string; 
+            category?: string; 
+            source?: string;
+            timestamp?: number;
+          };
+          if (!body.content) {
+            return new Response(JSON.stringify({ error: 'Content required to pin knowledge.' }), {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+
+          if (env.SHADOW_MEMORY) {
+            const existingRaw = await env.SHADOW_MEMORY.get('pinned_knowledge_base') || '';
+            const newEntry = `* [${body.category || 'INTEL'} - ${body.topic || 'General'} | Source: ${body.source || 'Autonomous Crawler'}]: ${body.content.trim()}`;
+            
+            // Keep the most recent 40 pinned ideas and news updates for instant sub-second retrieval
+            const existingEntries = existingRaw.split('\n').filter(e => e.trim().length > 0);
+            existingEntries.unshift(newEntry);
+            const trimmed = existingEntries.slice(0, 40).join('\n');
+
+            await env.SHADOW_MEMORY.put('pinned_knowledge_base', trimmed);
+            return new Response(JSON.stringify({ status: 'pinned', count: Math.min(existingEntries.length, 40) }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          return new Response(JSON.stringify({ status: 'ok', warning: 'No KV storage bound' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
       // ================================================================
       // ================================================================
       // DYNAMIC NEURAL VOICE STREAMING (Cartesia Sonic / ElevenLabs Flash)
@@ -684,16 +734,44 @@ export default {
             });
           }
 
+          // Sub-Second Quiz & Question Answer Cache Check (Cloudflare KV Edge)
+          // Guarantees instantaneous (sub-50ms) recall for previously learned quiz answers and related queries
+          const quizKey = `quiz_${normalizedMsg.slice(0, 80).replace(/\s+/g, '_')}`;
+          if (env.SHADOW_MEMORY && !body.image) {
+            try {
+              const cachedQuizAnswer = await env.SHADOW_MEMORY.get(quizKey);
+              if (cachedQuizAnswer) {
+                console.log('[EDGE CACHE HIT]: Instant quiz resolution for', normalizedMsg);
+                if (isStream) {
+                  return new Response(`data: {"response":${JSON.stringify(cachedQuizAnswer)}}\n\ndata: [DONE]\n\n`, {
+                    headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'X-Shadow-Edge-Cache': 'HIT' },
+                  });
+                }
+                return new Response(JSON.stringify({ reply: cachedQuizAnswer, cached: true }), {
+                  headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Shadow-Edge-Cache': 'HIT' },
+                });
+              }
+            } catch (cacheLookupErr) {
+              console.warn('Quiz cache lookup failed:', cacheLookupErr);
+            }
+          }
+
           // Fetch stored memories if available
           let storedMemory = body.memoryContext || '';
           if (!storedMemory && env.SHADOW_MEMORY) {
             storedMemory = (await env.SHADOW_MEMORY.get('user_psyche_notes')) || '';
           }
 
+          // Fetch pinned knowledge base and ideas from Cloudflare KV Edge
+          let pinnedKnowledge = '';
+          if (env.SHADOW_MEMORY) {
+            pinnedKnowledge = (await env.SHADOW_MEMORY.get('pinned_knowledge_base')) || '';
+          }
+
           // Real-Time Grounding: Fetch live breaking news or factual web search if query requests current events/leaders
           const liveGrounding = await getLiveGrounding(userMessage);
 
-          const dynamicSystemPrompt = buildHumanizedSystemPrompt(storedMemory, liveGrounding, body.deviceContext);
+          const dynamicSystemPrompt = buildHumanizedSystemPrompt(storedMemory, liveGrounding, body.deviceContext, pinnedKnowledge);
 
           // Clean recent history: Maintain full conversational memory (up to 12 items / 6 turns)
           // so Shadow maintains coherent context and follows the master's commands smoothly.
@@ -832,6 +910,9 @@ export default {
                 } else {
                   const groqData = await groqRes.json() as any;
                   const reply = groqData.choices?.[0]?.message?.content || 'The glass remains silent.';
+                  if (env.SHADOW_MEMORY && quizKey && reply && !reply.includes('error')) {
+                    ctx.waitUntil(env.SHADOW_MEMORY.put(quizKey, reply, { expirationTtl: 86400 * 7 }));
+                  }
                   return new Response(JSON.stringify({ reply }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                   });
@@ -862,6 +943,9 @@ export default {
                   temperature: 0.6,
                 });
                 const reply = aiResponse.response || 'Hello.';
+                if (env.SHADOW_MEMORY && quizKey && reply) {
+                  ctx.waitUntil(env.SHADOW_MEMORY.put(quizKey, reply, { expirationTtl: 86400 * 7 }));
+                }
                 return new Response(JSON.stringify({ reply }), {
                   headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 });
@@ -904,6 +988,9 @@ export default {
               const reply =
                 geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ||
                 'The reflection wavers in the void.';
+              if (env.SHADOW_MEMORY && quizKey && reply) {
+                ctx.waitUntil(env.SHADOW_MEMORY.put(quizKey, reply, { expirationTtl: 86400 * 7 }));
+              }
               return new Response(JSON.stringify({ reply }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
               });

@@ -1786,6 +1786,21 @@ async function streamConversation(userPrompt) {
     return;
   }
 
+  // Instant Local Quiz & Q&A Fast Memory Cache (Sub-20ms instant recall for identical / repeated quiz prompts)
+  var normalizedQuizKey = 'quiz_' + cleanPrompt.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, '_').slice(0, 80);
+  try {
+    var localCachedAnswer = localStorage.getItem(normalizedQuizKey);
+    if (localCachedAnswer && !isVisionQuery) {
+      console.log('[LOCAL QUIZ CACHE HIT]: Firing instantaneous answer in 15ms for:', cleanPrompt);
+      conversationHistory.push({ role: 'user', content: cleanPrompt });
+      conversationHistory.push({ role: 'assistant', content: localCachedAnswer });
+      persistHistory(conversationHistory);
+      enqueueSpeechClause(localCachedAnswer);
+      isAwaitingResponse = false;
+      return;
+    }
+  } catch(e) {}
+
   // Multimodal Vision Intent Detection:
   // "Shadow, what do you see?", "what do you see?", "what's in front of you?", "what are you looking at?", etc.
   var isVisionQuery = /\b(what do you see|what are you seeing|what is in front of you|what do you look at|what am i holding|describe what you see|can you see this|what is this|tell me what you see|look at this|what's in front of you|who is in front of you|what is that|tell me what's in front of you)\b/i.test(cleanPrompt);
@@ -1952,6 +1967,13 @@ async function streamConversation(userPrompt) {
         conversationHistory = conversationHistory.slice(-20);
       }
       persistHistory(conversationHistory);
+
+      // Cache Quiz & Fact QA pair in localStorage for instant sub-20ms fast path recall
+      if (normalizedQuizKey && fullReply.length > 5 && !fullReply.includes('error')) {
+        try {
+          localStorage.setItem(normalizedQuizKey, fullReply.trim());
+        } catch(e) {}
+      }
     } else {
       // Empty response safety fallback to prevent conversational deadlock
       resumeMicrophone(50);
